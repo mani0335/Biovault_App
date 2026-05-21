@@ -77,9 +77,10 @@ export async function embedSimpleWatermark(
         }
 
         ctx.putImageData(imageData, 0, 0);
-        const watermarkedBase64 = canvas.toDataURL('image/jpeg', 0.9);
+        // MUST use PNG (lossless) — JPEG compression destroys LSB steganography data
+        const watermarkedBase64 = canvas.toDataURL('image/png');
 
-        console.log('✅ Simple watermark embedded successfully');
+        console.log('✅ Simple watermark embedded successfully (PNG, lossless)');
         resolve(watermarkedBase64);
       } catch (err) {
         console.error('❌ Simple watermark embedding failed:', err);

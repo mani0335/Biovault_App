@@ -1526,7 +1526,17 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
         }
       }
 
-      const fileName = (doc.metadata?.original_name || getSafeName(doc)).replace(/[/\\?%*:|"<>]/g, '_');
+      // If the stored data is a lossless PNG watermark, give it a .png extension
+      // so OS apps recognise the format correctly
+      let rawFileName = (doc.metadata?.original_name || getSafeName(doc)).replace(/[/\\?%*:|"<>]/g, '_');
+      if (
+        typeof finalData === 'string' &&
+        finalData.startsWith('data:image/png') &&
+        !rawFileName.toLowerCase().endsWith('.png')
+      ) {
+        rawFileName = rawFileName.replace(/\.(jpe?g|gif|bmp|webp)$/i, '') + '.png';
+      }
+      const fileName = rawFileName;
       const folderName = 'PINIT Vault Documents';
 
       // Try saving directly to Directory.External (visible in file manager)
