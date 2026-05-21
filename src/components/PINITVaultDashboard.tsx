@@ -2850,9 +2850,9 @@ function EncryptPreviewPage({
 }
 
 // ============= SHARE PAGE =============
-function SharePage({ 
-  shareConfigs, setShareConfigs, 
-  shareHistory, setShareHistory, 
+function SharePage({
+  shareConfigs, setShareConfigs,
+  shareHistory, setShareHistory,
   selectedShareImage, setSelectedShareImage,
   shareExpiryDate, setShareExpiryDate,
   shareExpiryTime, setShareExpiryTime,
@@ -2863,7 +2863,11 @@ function SharePage({
   generatedQRCode, setGeneratedQRCode,
   shareStep, setShareStep,
   userId,
-  vaultDocuments
+  vaultDocuments,
+  sharePrintBlocked, setSharePrintBlocked,
+  shareDeviceRestriction, setShareDeviceRestriction,
+  shareGeoRestriction, setShareGeoRestriction,
+  downloadRequests, setDownloadRequests,
 }: {
   shareConfigs: ShareConfig[];
   setShareConfigs: React.Dispatch<React.SetStateAction<ShareConfig[]>>;
