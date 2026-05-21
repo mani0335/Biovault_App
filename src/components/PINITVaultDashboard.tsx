@@ -83,6 +83,10 @@ import {
   Github,
   Fingerprint,
   Bell,
+  Printer,
+  Monitor,
+  Send,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { appStorage } from "@/lib/storage";
@@ -634,6 +638,12 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
   const [generatedShareLink, setGeneratedShareLink] = useState<string>("");
   const [generatedQRCode, setGeneratedQRCode] = useState<string>("");
   const [shareStep, setShareStep] = useState<"select" | "configure" | "preview">("select");
+  // Extended access controls for share
+  const [sharePrintBlocked, setSharePrintBlocked] = useState<boolean>(false);
+  const [shareDeviceRestriction, setShareDeviceRestriction] = useState<'' | 'mobile' | 'desktop'>('');
+  const [shareGeoRestriction, setShareGeoRestriction] = useState<string>('');
+  // Download requests from viewers
+  const [downloadRequests, setDownloadRequests] = useState<any[]>([]);
 
   // Quick Action refs for camera and file upload
   const quickActionCameraRef = useRef<HTMLInputElement>(null);
@@ -719,6 +729,23 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
     };
 
     initializeVault();
+  }, [userId]);
+
+  // Load download requests for this user's shares
+  useEffect(() => {
+    if (!userId) return;
+    const fetchRequests = async () => {
+      try {
+        const { data } = await supabase
+          .from('download_requests')
+          .select('*')
+          .eq('owner_user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (data) setDownloadRequests(data);
+      } catch { /* silent */ }
+    };
+    fetchRequests();
   }, [userId]);
 
   // Verify authentication and load user data on mount
@@ -902,6 +929,9 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
           setShareDownloadLimit(null);
           setSharePassword("");
           setIncludeCertificate(false);
+          setSharePrintBlocked(false);
+          setShareDeviceRestriction('');
+          setShareGeoRestriction('');
         }} onDeleteDocument={async (docId: string) => {
           // Optimistically remove from parent state
           setVaultDocuments((prev) => prev.filter((d) => d.id !== docId));
@@ -922,7 +952,7 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
           }
         }} />}
         {currentPage === "portfolio" && <PortfolioHome key="portfolio" userId={userId} />}
-        {currentPage === "share" && <SharePage key="share" shareConfigs={shareConfigs} setShareConfigs={setShareConfigs} shareHistory={shareHistory} setShareHistory={setShareHistory} selectedShareImage={selectedShareImage} setSelectedShareImage={setSelectedShareImage} shareExpiryDate={shareExpiryDate} setShareExpiryDate={setShareExpiryDate} shareExpiryTime={shareExpiryTime} setShareExpiryTime={setShareExpiryTime} shareDownloadLimit={shareDownloadLimit} setShareDownloadLimit={setShareDownloadLimit} sharePassword={sharePassword} setSharePassword={setSharePassword} includeCertificate={includeCertificate} setIncludeCertificate={setIncludeCertificate} generatedShareLink={generatedShareLink} setGeneratedShareLink={setGeneratedShareLink} generatedQRCode={generatedQRCode} setGeneratedQRCode={setGeneratedQRCode} shareStep={shareStep} setShareStep={setShareStep} userId={userId} vaultDocuments={vaultDocuments} />}
+        {currentPage === "share" && <SharePage key="share" shareConfigs={shareConfigs} setShareConfigs={setShareConfigs} shareHistory={shareHistory} setShareHistory={setShareHistory} selectedShareImage={selectedShareImage} setSelectedShareImage={setSelectedShareImage} shareExpiryDate={shareExpiryDate} setShareExpiryDate={setShareExpiryDate} shareExpiryTime={shareExpiryTime} setShareExpiryTime={setShareExpiryTime} shareDownloadLimit={shareDownloadLimit} setShareDownloadLimit={setShareDownloadLimit} sharePassword={sharePassword} setSharePassword={setSharePassword} includeCertificate={includeCertificate} setIncludeCertificate={setIncludeCertificate} generatedShareLink={generatedShareLink} setGeneratedShareLink={setGeneratedShareLink} generatedQRCode={generatedQRCode} setGeneratedQRCode={setGeneratedQRCode} shareStep={shareStep} setShareStep={setShareStep} userId={userId} vaultDocuments={vaultDocuments} sharePrintBlocked={sharePrintBlocked} setSharePrintBlocked={setSharePrintBlocked} shareDeviceRestriction={shareDeviceRestriction} setShareDeviceRestriction={setShareDeviceRestriction} shareGeoRestriction={shareGeoRestriction} setShareGeoRestriction={setShareGeoRestriction} downloadRequests={downloadRequests} setDownloadRequests={setDownloadRequests} />}
         {currentPage === "identity" && <IdentityPage key="identity" userName={userName} userId={userId} />}
         {currentPage === "crypto" && <ImageCryptoFull key="crypto" userId={userId || undefined} />}
         {currentPage === "vault-advanced" && <VaultManager key="vault-advanced" userId={userId || undefined} />}
@@ -2859,6 +2889,14 @@ function SharePage({
   setShareStep: React.Dispatch<React.SetStateAction<"select" | "configure" | "preview">>;
   userId: string | null;
   vaultDocuments: VaultDocument[];
+  sharePrintBlocked: boolean;
+  setSharePrintBlocked: React.Dispatch<React.SetStateAction<boolean>>;
+  shareDeviceRestriction: '' | 'mobile' | 'desktop';
+  setShareDeviceRestriction: React.Dispatch<React.SetStateAction<'' | 'mobile' | 'desktop'>>;
+  shareGeoRestriction: string;
+  setShareGeoRestriction: React.Dispatch<React.SetStateAction<string>>;
+  downloadRequests: any[];
+  setDownloadRequests: React.Dispatch<React.SetStateAction<any[]>>;
 }) {
   const generateShareLink = () => {
     // Generate unique share ID
@@ -3066,6 +3104,11 @@ function SharePage({
         is_active: true,
         access_count: 0,
         created_by: userId || 'PINIT User',
+        print_blocked: sharePrintBlocked,
+        device_restriction: shareDeviceRestriction || null,
+        geo_restriction: shareGeoRestriction.trim()
+          ? JSON.stringify(shareGeoRestriction.split(',').map(c => c.trim().toUpperCase()).filter(Boolean))
+          : null,
         expiry_date: shareExpiryDate
           ? (() => {
               // Build a local-time date so the user's chosen time isn't shifted by the UTC offset
@@ -3325,6 +3368,140 @@ function SharePage({
                 </div>
                 <p className="text-xs text-purple-300/60 mt-2">Share authorship certificate with recipient</p>
               </motion.div>
+
+              {/* PRINT BLOCKED */}
+              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Printer className="w-5 h-5 text-red-400" />
+                    <label className="font-semibold text-white">Block Printing</label>
+                  </div>
+                  <button
+                    onClick={() => setSharePrintBlocked(!sharePrintBlocked)}
+                    className={`w-10 h-6 rounded-full transition-all ${sharePrintBlocked ? "bg-red-600" : "bg-slate-600"}`}
+                  />
+                </div>
+                <p className="text-xs text-purple-300/60 mt-2">Prevent recipient from printing (Ctrl+P blocked)</p>
+              </motion.div>
+
+              {/* DEVICE RESTRICTION */}
+              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
+                <div className="flex items-center gap-2 mb-3">
+                  <Smartphone className="w-5 h-5 text-orange-400" />
+                  <label className="font-semibold text-white">Device Restriction</label>
+                </div>
+                <select
+                  value={shareDeviceRestriction}
+                  onChange={(e) => setShareDeviceRestriction(e.target.value as '' | 'mobile' | 'desktop')}
+                  className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
+                >
+                  <option value="">Any Device (no restriction)</option>
+                  <option value="mobile">Mobile Only</option>
+                  <option value="desktop">Desktop / Laptop Only</option>
+                </select>
+                <p className="text-xs text-purple-300/60 mt-2">Restrict access by device type</p>
+              </motion.div>
+
+              {/* GEO RESTRICTION */}
+              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
+                <div className="flex items-center gap-2 mb-3">
+                  <Globe className="w-5 h-5 text-purple-400" />
+                  <label className="font-semibold text-white">Geographic Restriction</label>
+                </div>
+                <input
+                  type="text"
+                  value={shareGeoRestriction}
+                  onChange={(e) => setShareGeoRestriction(e.target.value)}
+                  placeholder="e.g. IN, US, GB (leave blank for any)"
+                  className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
+                />
+                <p className="text-xs text-purple-300/60 mt-2">Comma-separated country codes — blank = no restriction</p>
+              </motion.div>
+
+              {/* DOWNLOAD REQUESTS PANEL */}
+              {downloadRequests.length > 0 && (
+                <motion.div className="p-4 bg-cyan-900/20 border border-cyan-500/20 rounded-xl">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Bell className="w-5 h-5 text-cyan-400" />
+                    <label className="font-semibold text-white">Download Requests</label>
+                    <span className="ml-auto bg-cyan-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                      {downloadRequests.filter(r => r.status === 'pending').length} pending
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {downloadRequests.map((req: any) => (
+                      <div key={req.id} className="bg-slate-700/50 border border-slate-600 rounded-xl p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-semibold truncate">{req.requester_name}</p>
+                            {req.requester_message && (
+                              <p className="text-slate-400 text-xs mt-0.5 line-clamp-2">{req.requester_message}</p>
+                            )}
+                            <p className="text-slate-500 text-xs mt-1">
+                              {new Date(req.created_at).toLocaleString()} · {req.share_id?.substring(0, 16)}...
+                            </p>
+                          </div>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                            req.status === 'pending' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/40'
+                            : req.status === 'approved' ? 'bg-green-900/40 text-green-300 border border-green-700/40'
+                            : 'bg-red-900/40 text-red-300 border border-red-700/40'
+                          }`}>
+                            {req.status}
+                          </span>
+                        </div>
+                        {req.status === 'pending' && (
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  // Get current share limits
+                                  const { data: share } = await supabase
+                                    .from('share_configs')
+                                    .select('download_limit,downloads_used')
+                                    .eq('share_id', req.share_id)
+                                    .maybeSingle();
+                                  const newLimit = share?.download_limit !== null && share?.download_limit !== undefined
+                                    ? share.download_limit + 1
+                                    : 1;
+                                  // Grant one more download
+                                  await supabase.from('share_configs')
+                                    .update({ download_limit: newLimit })
+                                    .eq('share_id', req.share_id);
+                                  // Mark request approved
+                                  await supabase.from('download_requests')
+                                    .update({ status: 'approved', responded_at: new Date().toISOString() })
+                                    .eq('id', req.id);
+                                  setDownloadRequests(prev => prev.map(r =>
+                                    r.id === req.id ? { ...r, status: 'approved' } : r));
+                                } catch (err) {
+                                  alert('❌ Failed to approve. Please try again.');
+                                }
+                              }}
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold py-1.5 rounded-lg transition-all">
+                              ✓ Approve
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await supabase.from('download_requests')
+                                    .update({ status: 'denied', responded_at: new Date().toISOString() })
+                                    .eq('id', req.id);
+                                  setDownloadRequests(prev => prev.map(r =>
+                                    r.id === req.id ? { ...r, status: 'denied' } : r));
+                                } catch (err) {
+                                  alert('❌ Failed to deny. Please try again.');
+                                }
+                              }}
+                              className="flex-1 bg-red-900/40 hover:bg-red-700/60 text-red-300 text-xs font-semibold py-1.5 rounded-lg border border-red-700/40 transition-all">
+                              ✗ Deny
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
             </div>
 
             <Button
