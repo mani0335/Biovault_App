@@ -2943,6 +2943,10 @@ function SharePage({
             if (rawData.startsWith('data:image')) {
               // Already a complete, displayable data URL
               previewDataUrl = rawData;
+            } else if (rawData.startsWith('data:application/pdf')) {
+              // PDF data URL — pass through as-is
+              previewDataUrl = rawData;
+              console.log(`✅ PDF data URL detected for share (${Math.round(rawData.length / 1024)} KB)`);
             } else if (rawData.length > 5000) {
               // Raw base64 — wrap it (skip PDFs)
               try {
