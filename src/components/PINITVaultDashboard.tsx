@@ -3130,7 +3130,11 @@ function SharePage({
         insertPayload.vault_image_id = imageUrlForShare;
       }
 
-      // ── Attempt 1: insert with image URL ──────────────────────────────────
+      // Helper: is this a "column not found in schema cache" error?
+      const isSchemaError = (e: any) =>
+        e?.code === 'PGRST204' || (e?.message || '').toLowerCase().includes('schema cache');
+
+      // ── Attempt 1: full payload (with image URL + new access-control columns) ──
       let insertOk = false;
       const { error: supabaseError } = await supabase
         .from('share_configs')
@@ -3138,28 +3142,54 @@ function SharePage({
 
       if (!supabaseError) {
         insertOk = true;
-        console.log('✅ Share saved to Supabase (with image URL)');
+        console.log('✅ Share saved to Supabase (full payload)');
       } else {
         console.warn('⚠️ Share insert attempt 1 failed:', supabaseError.code, supabaseError.message);
-        // ── Attempt 2: retry without image URL ────────────────────────────
+
+        // ── Attempt 2: drop image URL (large value can exceed column limits) ──
         delete insertPayload.vault_image_id;
-        const { error: retryError } = await supabase
-          .from('share_configs')
-          .insert(insertPayload);
-        if (!retryError) {
+        const { error: err2 } = await supabase.from('share_configs').insert(insertPayload);
+        if (!err2) {
           insertOk = true;
           console.log('✅ Share saved to Supabase (without image URL)');
         } else {
-          console.error('❌ Supabase insert failed entirely:', retryError.code, retryError.message, retryError.details, retryError.hint);
-          // Show the real error so the user (and dev) can diagnose it
-          alert(
-            `⚠️ Share link was created locally but COULD NOT be saved to the server.\n\n` +
-            `Error: ${retryError.message}\n` +
-            `Code: ${retryError.code}\n\n` +
-            `The link will NOT work for others until this is resolved.\n` +
-            `Please contact support with this error code.`
-          );
-          return; // Don't show "success" if save failed
+          console.warn('⚠️ Attempt 2 failed:', err2.code, err2.message);
+
+          // ── Attempt 3: also drop new columns that may not exist yet (PGRST204) ──
+          if (isSchemaError(err2) || isSchemaError(supabaseError)) {
+            delete (insertPayload as any).print_blocked;
+            delete (insertPayload as any).device_restriction;
+            delete (insertPayload as any).geo_restriction;
+            const { error: err3 } = await supabase.from('share_configs').insert(insertPayload);
+            if (!err3) {
+              insertOk = true;
+              console.log('✅ Share saved without new access-control columns (run SQL migration to enable them)');
+            } else {
+              // ── Attempt 4: also drop vault_image_id ──────────────────────
+              delete (insertPayload as any).vault_image_id;
+              const { error: err4 } = await supabase.from('share_configs').insert(insertPayload);
+              if (!err4) {
+                insertOk = true;
+                console.log('✅ Share saved (minimal payload)');
+              } else {
+                console.error('❌ All insert attempts failed:', err4);
+                alert(
+                  `⚠️ Share link was created locally but COULD NOT be saved to the server.\n\n` +
+                  `Error: ${err4.message}\nCode: ${err4.code}\n\n` +
+                  `The link will NOT work for others until this is resolved.`
+                );
+                return;
+              }
+            }
+          } else {
+            console.error('❌ Supabase insert failed:', err2);
+            alert(
+              `⚠️ Share link was created locally but COULD NOT be saved to the server.\n\n` +
+              `Error: ${err2.message}\nCode: ${err2.code}\n\n` +
+              `The link will NOT work for others until this is resolved.`
+            );
+            return;
+          }
         }
       }
 
