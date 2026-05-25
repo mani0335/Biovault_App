@@ -1,6 +1,7 @@
 /**
  * PortfolioShare.tsx
- * Advanced portfolio sharing UI — 100% backend-free via self-contained tokens.
+ * Advanced portfolio sharing UI — Supabase-backed clean token architecture.
+ * Tokens: portfolio_{timestamp}_{rand6}   URL: /share/{token}
  */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
@@ -131,17 +132,20 @@ export default function PortfolioShare() {
   }, []);
 
   /* ── load active shares ── */
-  const loadShares = () => {
+  const loadShares = async () => {
     setLoadingShares(true);
     try {
-      setMyShares(getOwnerShares(userId));
+      const shares = await getOwnerShares(userId);
+      setMyShares(shares);
+    } catch {
+      // keep existing state on error
     } finally {
       setLoadingShares(false);
     }
   };
 
   useEffect(() => {
-    if (showPanel) loadShares();
+    if (showPanel) { loadShares(); }
   }, [showPanel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── compute the public-facing base URL (avoids localhost on Android WebView) ── */
@@ -167,7 +171,7 @@ export default function PortfolioShare() {
   };
 
   /* ── generate share link ── */
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!portfolio || !userId) return;
     setGenerating(true);
     setGenError('');
@@ -178,11 +182,10 @@ export default function PortfolioShare() {
         ...settings,
         selectedSections: settings.mode === 'entire' ? [] : settings.selectedSections,
       };
-      const token = createShare(userId, userName, portfolio, finalSettings);
-      const base  = getPublicBaseUrl();
-      const link  = `${base}/shared/portfolio/${token}`;
+      // createShare() returns the full share URL (saved to Supabase)
+      const link = await createShare(userId, userName, portfolio, finalSettings);
       setShareLink(link);
-      loadShares(); // refresh active shares list
+      await loadShares(); // refresh active shares list
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Failed to generate link. Try again.');
     } finally {
@@ -217,30 +220,32 @@ export default function PortfolioShare() {
   };
 
   /* ── active shares actions ── */
-  const handleRevoke = (shareId: string) => {
-    revokeShare(shareId);
-    loadShares();
+  const handleRevoke = async (shareId: string) => {
+    await revokeShare(shareId);
+    await loadShares();
     snack('Link revoked — recipients can no longer access it');
   };
 
-  const handleRestore = (shareId: string) => {
-    restoreShare(shareId);
-    loadShares();
+  const handleRestore = async (shareId: string) => {
+    await restoreShare(shareId);
+    await loadShares();
     snack('Link restored');
   };
 
   const handleDelete = (shareId: string) => {
     setDeletingId(shareId);
-    setTimeout(() => {
-      deleteShareRecord(shareId);
-      loadShares();
+    setTimeout(async () => {
+      await deleteShareRecord(shareId);
+      await loadShares();
       setDeletingId('');
       snack('Share record deleted');
     }, 300);
   };
 
   const handleCopyExisting = async (record: ShareRecord) => {
-    const link = `${window.location.origin}/shared/portfolio/${record.token}`;
+    // record.token is the clean share_id; build the share URL
+    const base = getPublicBaseUrl();
+    const link = `${base}/share/${record.token}`;
     try {
       await navigator.clipboard.writeText(link);
       snack('Link copied!');
@@ -781,7 +786,7 @@ export default function PortfolioShare() {
               {/* security note */}
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center' }}>
                 <Shield size={12} color="#6b7280" />
-                <span style={{ color: '#4b5563', fontSize: 11 }}>Self-contained link — works globally, no server dependency</span>
+                <span style={{ color: '#4b5563', fontSize: 11 }}>Secured by BioVault · Cloud-backed token · Globally accessible</span>
               </div>
             </motion.div>
           )}

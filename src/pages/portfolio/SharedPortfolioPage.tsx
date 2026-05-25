@@ -1,8 +1,8 @@
 /**
  * SharedPortfolioPage.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * Renders a publicly-shared portfolio from a self-contained token.
- * NO backend call — token is decoded entirely on-device (no 404 ever).
+ * Renders a publicly-shared portfolio fetched from Supabase via clean token.
+ * URL: /share/portfolio_{timestamp}_{rand6}
  *
  * Supports:
  *   • Expiry validation         • View-limit enforcement
@@ -321,22 +321,27 @@ export default function SharedPortfolioPage() {
   useEffect(() => {
     if (!token) { setErrorKind('invalid'); setErrorMsg('Invalid share link.'); setState('error'); return; }
 
-    const result = loadShare(token);
+    let cancelled = false;
 
-    if (result.status !== 'ok') {
-      setErrorKind(result.status as ErrorKind);
-      setErrorMsg(result.message);
-      setRecord(result.record);
-      setState('error');
-      return;
-    }
+    async function doLoad() {
+      const result = await loadShare(token!);
+      if (cancelled) return;
 
-    const rec = result.record!;
+      if (result.status !== 'ok') {
+        setErrorKind(result.status as ErrorKind);
+        setErrorMsg(result.message);
+        setRecord(result.record);
+        setState('error');
+        return;
+      }
 
-    // Geo check
-    if (rec.settings.allowedCountry) {
-      setState('geo_checking');
-      checkGeoAccess(rec.settings.allowedCountry).then(allowed => {
+      const rec = result.record!;
+
+      // Geo check
+      if (rec.settings.allowedCountry) {
+        setState('geo_checking');
+        const allowed = await checkGeoAccess(rec.settings.allowedCountry);
+        if (cancelled) return;
         if (!allowed) {
           setErrorKind('geo');
           setErrorMsg(`This portfolio is restricted to viewers in ${rec.settings.allowedCountry}. Access denied from your current location.`);
@@ -345,11 +350,14 @@ export default function SharedPortfolioPage() {
           setRecord(rec);
           setState('loaded');
         }
-      });
-    } else {
-      setRecord(rec);
-      setState('loaded');
+      } else {
+        setRecord(rec);
+        setState('loaded');
+      }
     }
+
+    doLoad();
+    return () => { cancelled = true; };
   }, [token]);
 
   /* ─────────────────────── LOADING ─────────────────────── */

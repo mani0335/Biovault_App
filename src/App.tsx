@@ -23,6 +23,7 @@ const DocumentHub      = lazy(() => import("@/pages/DocumentHub"));
 const ReviewPage       = lazy(() => import("@/pages/ReviewPage"));
 const NotFound         = lazy(() => import("@/pages/NotFound"));
 const SharedImageViewer = lazy(() => import("@/components/SharedImageViewer").then(m => ({ default: m.SharedImageViewer })));
+const ShareRouter       = lazy(() => import("@/components/ShareRouter"));
 
 // Portfolio pages
 const PortfolioHome        = lazy(() => import("@/pages/portfolio/PortfolioHome"));
@@ -31,7 +32,6 @@ const PortfolioView        = lazy(() => import("@/pages/portfolio/PortfolioView"
 const PortfolioEdit        = lazy(() => import("@/pages/portfolio/PortfolioEdit"));
 const PortfolioShare       = lazy(() => import("@/pages/portfolio/PortfolioShare"));
 const ChoosePortfolioType  = lazy(() => import("@/pages/portfolio/ChoosePortfolioType"));
-const SharedPortfolioPage  = lazy(() => import("@/pages/portfolio/SharedPortfolioPage"));
 const ActivityPage         = lazy(() => import("@/pages/ActivityPage"));
 
 // Profile sub-pages
@@ -230,8 +230,8 @@ const App = () => (
           } />
 
           {/* ─── Public share routes — no login required ─── */}
-          <Route path="/share/:token" element={<SharedImageViewer />} />
-          <Route path="/shared/portfolio/:token" element={<SharedPortfolioPage />} />
+          {/* ShareRouter detects token prefix: portfolio_* → SharedPortfolioPage, else → SharedImageViewer */}
+          <Route path="/share/:token" element={<ShareRouter />} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>
