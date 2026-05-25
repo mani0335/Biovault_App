@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { SecurePdfViewer } from "../components/SecurePdfViewer";
 import BottomNav from "../components/BottomNav";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -291,25 +292,14 @@ export default function VaultPage({ onBack }: VaultPageProps) {
                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 0 60px rgba(0,0,0,0.9)' }}
               />
             ) : (
-              /* ── PDF / document — open natively ── */
-              <div style={{ textAlign: 'center', color: 'white', maxWidth: 320 }}>
-                <div style={{ fontSize: 72, marginBottom: 16, lineHeight: 1 }}>📄</div>
-                <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, wordBreak: 'break-all' }}>{fullscreenPreview.name}</p>
-                <p style={{ color: 'rgba(148,163,184,1)', fontSize: 13, marginBottom: 28 }}>
-                  PDF documents cannot be displayed inline on Android.
-                  Tap below to open with your PDF viewer app.
-                </p>
-                <button
-                  onClick={() => openPdfNatively(fullscreenPreview.dataUrl, fullscreenPreview.name)}
-                  style={{
-                    background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)',
-                    color: 'white', border: 'none', borderRadius: 14,
-                    padding: '14px 32px', fontSize: 15, fontWeight: 700,
-                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
-                  }}
-                >
-                  📂 Open PDF
-                </button>
+              /* ── PDF — render inline with SecurePdfViewer, never open externally ── */
+              <div style={{ width: '100%', height: '100%', minHeight: '70vh' }} onClick={e => e.stopPropagation()}>
+                <SecurePdfViewer
+                  pdfData={fullscreenPreview.dataUrl}
+                  fileName={fullscreenPreview.name}
+                  downloadEnabled={true}
+                  onClose={() => setFullscreenPreview(null)}
+                />
               </div>
             )}
           </div>
@@ -585,20 +575,21 @@ export default function VaultPage({ onBack }: VaultPageProps) {
                           </button>
                         </div>
                       ) : (selectedDoc.fileType === "pdf" || decryptedContent?.startsWith('data:application/pdf') || decryptedContent) ? (
-                        <div className="p-6 text-center">
-                          <p className="text-4xl mb-2">📄</p>
-                          <p className="text-gray-300 font-medium">{getDocName(selectedDoc)}</p>
-                          <p className="text-gray-500 text-xs mt-1 mb-3">
-                            {selectedDoc.fileType === "pdf" || decryptedContent?.startsWith('data:application/pdf')
-                              ? 'PDF — tap Preview to open with your PDF app'
-                              : 'Tap Preview to open this file'}
-                          </p>
-                          <button
-                            onClick={() => decryptedContent && openPdfNatively(decryptedContent, getDocName(selectedDoc))}
-                            className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-purple-600 text-white text-sm font-semibold rounded-lg hover:opacity-90 transition"
-                          >
-                            📂 Open with device app
-                          </button>
+                        <div className="p-4">
+                          {decryptedContent ? (
+                            <SecurePdfViewer
+                              pdfData={decryptedContent}
+                              fileName={getDocName(selectedDoc)}
+                              downloadEnabled={true}
+                              onClose={() => setSelectedDoc(null)}
+                            />
+                          ) : (
+                            <div className="p-6 text-center">
+                              <p className="text-4xl mb-2">📄</p>
+                              <p className="text-gray-300 font-medium">{getDocName(selectedDoc)}</p>
+                              <p className="text-gray-500 text-xs mt-2">Decrypting…</p>
+                            </div>
+                          )}
                         </div>
                       ) : null}
                     </div>
