@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader, AlertCircle } from "lucide-react";
+import { logSecurityEventSync } from "@/lib/activityService";
 
 interface SecurePdfViewerProps {
   /** Raw base64 string (no data: prefix) or a full  data:application/pdf;base64,…  URL */
@@ -20,6 +21,10 @@ interface SecurePdfViewerProps {
   /** If false the user cannot save / share the file */
   downloadEnabled?: boolean;
   onClose?: () => void;
+  /** Optional: document owner's userId — enables activity logging for print/copy blocks */
+  activityUserId?: string;
+  /** Optional: share token/id — links logged events to a specific share */
+  activityShareId?: string;
 }
 
 export function SecurePdfViewer({
@@ -27,6 +32,8 @@ export function SecurePdfViewer({
   fileName = "document.pdf",
   downloadEnabled = false,
   onClose,
+  activityUserId,
+  activityShareId,
 }: SecurePdfViewerProps) {
   const [totalPages, setTotalPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -39,15 +46,28 @@ export function SecurePdfViewer({
 
   // ── Block print ────────────────────────────────────────────────────────────
   useEffect(() => {
+    const logPrint = () => {
+      if (activityUserId) {
+        logSecurityEventSync(
+          activityUserId,
+          activityShareId || 'vault',
+          'print_attempted',
+          fileName,
+          'Print attempt blocked by SecurePdfViewer'
+        );
+      }
+    };
     const blockPrint = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
+      logPrint();
       alert("🔒 Printing is not allowed for this protected document.");
     };
     window.addEventListener("beforeprint", blockPrint);
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
+        logPrint();
         alert("🔒 Printing is not allowed.");
       }
     };
@@ -56,7 +76,7 @@ export function SecurePdfViewer({
       window.removeEventListener("beforeprint", blockPrint);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
+  }, [activityUserId, activityShareId, fileName]);
 
   // ── Load PDF.js and parse document ────────────────────────────────────────
   useEffect(() => {
@@ -189,7 +209,18 @@ export function SecurePdfViewer({
   return (
     <div
       style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0f172a" }}
-      onContextMenu={(e) => e.preventDefault()} // block long-press save
+      onContextMenu={(e) => {
+        e.preventDefault(); // block long-press save
+        if (activityUserId) {
+          logSecurityEventSync(
+            activityUserId,
+            activityShareId || 'vault',
+            'copy_attempted',
+            fileName,
+            'Right-click/context-menu blocked'
+          );
+        }
+      }}
     >
       {/* ── Header bar ─────────────────────────────────────────────────────── */}
       <div

@@ -43,12 +43,19 @@ export const SharedImageViewer: React.FC = () => {
   // Screenshot / screen-capture detection
   useEffect(() => {
     if (!shareData) return;
+    const fileNameLower = (shareData.image_name || '').toLowerCase();
+    const fType: 'pdf' | 'image' = fileNameLower.endsWith('.pdf') ? 'pdf' : 'image';
+
     const logScreenshot = () => {
       logActivityEvent({
         userId: shareData.user_id,
+        shareId: token,
         type: 'screenshot_attempted',
-        title: 'Screenshot Detected',
-        description: `Screenshot or screen-capture was detected while viewing "${shareData.image_name || 'document'}"`,
+        fileName: shareData.image_name || 'document',
+        fileType: fType,
+        securityEvents: ['screenshot_attempted'],
+        status: 'warning',
+        screenshotAttempts: 1,
         metadata: { share_id: token },
       });
     };
@@ -63,9 +70,12 @@ export const SharedImageViewer: React.FC = () => {
       if (document.hidden) {
         logActivityEvent({
           userId: shareData.user_id,
+          shareId: token,
           type: 'tab_switch',
-          title: 'Viewer Left Share Page',
-          description: `User switched away while viewing "${shareData.image_name || 'document'}"`,
+          fileName: shareData.image_name || 'document',
+          fileType: fType,
+          securityEvents: ['tab_switch'],
+          status: 'warning',
           metadata: { share_id: token },
         });
       }
@@ -140,9 +150,11 @@ export const SharedImageViewer: React.FC = () => {
         // Log view activity for the document owner
         logActivityEvent({
           userId: row.user_id,
+          shareId: token,
           type: 'link_accessed',
-          title: 'Shared Document Viewed',
-          description: `"${row.image_name || 'document'}" was viewed via share link`,
+          fileName: row.image_name || 'document',
+          fileType: (row.image_name || '').toLowerCase().endsWith('.pdf') ? 'pdf' : 'image',
+          viewCount: (row.access_count || 0) + 1,
           metadata: { share_id: token, share_link: row.share_link },
         });
 
@@ -215,10 +227,12 @@ export const SharedImageViewer: React.FC = () => {
       // Log download activity for the document owner
       logActivityEvent({
         userId: shareData.user_id,
+        shareId: token,
         type: 'downloaded',
-        title: 'Shared Document Downloaded',
-        description: `"${filename}" was downloaded (${newUsed}/${shareData.download_limit ?? '∞'} downloads used)`,
-        metadata: { share_id: token, filename, downloads_used: newUsed },
+        fileName: filename,
+        fileType: isPdf ? 'pdf' : 'image',
+        downloadAttempts: newUsed,
+        metadata: { share_id: token, filename, downloads_used: newUsed, limit: shareData.download_limit ?? '∞' },
       });
 
       setShareData(prev => prev ? { ...prev, downloads_used: newUsed } : prev);
@@ -383,6 +397,8 @@ export const SharedImageViewer: React.FC = () => {
                 pdfData={contentUrl!}
                 fileName={shareData.image_name || 'document.pdf'}
                 downloadEnabled={!shareData.download_limit || (shareData.downloads_used || 0) < shareData.download_limit}
+                activityUserId={shareData.user_id}
+                activityShareId={token}
               />
             </div>
             <div className="px-4 py-3 flex items-center justify-between border-t border-slate-700">

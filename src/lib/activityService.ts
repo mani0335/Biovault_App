@@ -492,6 +492,63 @@ export async function revokeShareLink(shareId: string, userId: string, fileName:
   }
 }
 
+/**
+ * Fetch activity events from Supabase and merge them into localStorage.
+ * Call this on ActivityPage mount so events logged by external share-link
+ * viewers (on their own devices) appear for the document owner.
+ * Safe to call even if the table doesn't exist — errors are silently ignored.
+ */
+export async function syncFromSupabase(userId: string): Promise<void> {
+  try {
+    const { data, error } = await (supabase as any)
+      .from('activity_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (error || !data || !Array.isArray(data)) return;
+
+    const existing = readEvents();
+    const existingIds = new Set(existing.map((e) => e.id));
+
+    const newEvents: ActivityEvent[] = (data as any[])
+      .filter((row) => !existingIds.has(row.event_id))
+      .map((row) => ({
+        id: row.event_id,
+        userId: row.user_id,
+        shareId: row.share_id,
+        type: row.event_type as ActivityEventType,
+        fileName: row.file_name || 'Unknown file',
+        fileType: (row.file_type || 'unknown') as ActivityEvent['fileType'],
+        sharedBy: row.user_id,
+        recipientEmail: row.recipient_email,
+        recipientName: row.recipient_name,
+        timestamp: row.created_at,
+        deviceInfo: row.device_info || '',
+        deviceType: (row.device_type || 'unknown') as ActivityEvent['deviceType'],
+        ipAddress: row.ip_address || 'Unknown',
+        geoLocation: row.geo_city && row.geo_country ? `${row.geo_city}, ${row.geo_country}` : 'Unknown',
+        geoCountry: row.geo_country || 'Unknown',
+        geoCity: row.geo_city || 'Unknown',
+        riskScore: row.risk_score || 0,
+        status: (row.status || 'success') as ActivityStatus,
+        securityEvents: row.security_events || [],
+        viewCount: 1,
+        downloadAttempts: 0,
+        screenshotAttempts: 0,
+        metadata: row.metadata || {},
+      }));
+
+    if (newEvents.length > 0) {
+      const merged = [...newEvents, ...existing];
+      writeEvents(merged);
+    }
+  } catch {
+    // Table doesn't exist yet — silent failure is fine
+  }
+}
+
 /** Clear all activity events for a user */
 export function clearAllActivity(userId: string): void {
   const events = readEvents().filter((e) => e.userId !== userId);

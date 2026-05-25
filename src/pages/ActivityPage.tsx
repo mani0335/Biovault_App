@@ -18,6 +18,7 @@ import {
   getEventsByCategory, getAllShareAnalytics,
   getActivityStats, revokeShareLink, clearAllActivity,
   formatRelativeTime, getRiskLevel, getEventLabel, logActivityEvent,
+  syncFromSupabase,
 } from '@/lib/activityService';
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
@@ -694,6 +695,13 @@ const ActivityPage: React.FC = () => {
   }, [userId, activeTab]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Sync from Supabase on first mount so events logged by external share-link
+  // viewers (on their own devices) appear for the document owner.
+  useEffect(() => {
+    syncFromSupabase(userId).then(() => loadData());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   useEffect(() => {
     const h = () => loadData();
