@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
+import BottomNav from "@/components/BottomNav";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera as CapacitorCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { Filesystem, Directory } from "@capacitor/filesystem";
@@ -1193,66 +1194,8 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
         )}
       </AnimatePresence>
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent backdrop-blur-xl border-t border-purple-500/30">
-        <div className="flex justify-around items-center h-20 px-2">
-          <NavButton
-            icon={Home}
-            label="Home"
-            active={currentPage === "home"}
-            onClick={() => {
-              try {
-                setCurrentPage("home");
-              } catch (e) {
-                console.error("Error navigating to home:", e);
-              }
-            }}
-          />
-          <NavButton
-            icon={Briefcase}
-            label="Vault"
-            active={currentPage === "vault"}
-            onClick={() => {
-              try {
-                setCurrentPage("vault");
-              } catch (e) {
-                console.error("Error navigating to vault:", e);
-              }
-            }}
-          />
-                    <NavButton
-            icon={Plus}
-            label="Portfolio"
-            active={currentPage === "portfolio"}
-            onClick={() => {
-              try {
-                console.log('🚀 Dashboard: Portfolio button clicked, setting currentPage to portfolio');
-                setCurrentPage("portfolio");
-              } catch (e) {
-                console.error("Error navigating to portfolio:", e);
-              }
-            }}
-          />
-          <NavButton
-            icon={Clock}
-            label="Activity"
-            active={false}
-            onClick={() => navigate("/activity")}
-          />
-          <NavButton
-            icon={User}
-            label="Profile"
-            active={currentPage === "profile"}
-            onClick={() => {
-              try {
-                setCurrentPage("profile");
-              } catch (e) {
-                console.error("Error navigating to profile:", e);
-              }
-            }}
-          />
-        </div>
-      </div>
+      {/* Bottom Navigation — same component used app-wide for consistent design */}
+      <BottomNav />
     </div>
   );
 }
