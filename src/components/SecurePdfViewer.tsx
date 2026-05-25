@@ -70,10 +70,10 @@ export function SecurePdfViewer({
         // Dynamically import pdfjs-dist so it only loads when needed
         const pdfjs = await import("pdfjs-dist");
 
-        // Use the CDN worker so Rollup never needs to resolve the worker file
-        // at build time. This is the most reliable approach across all bundlers.
+        // jsdelivr mirrors every npm package, so this always resolves to the
+        // exact installed version of pdfjs-dist without bundling the worker.
         pdfjs.GlobalWorkerOptions.workerSrc =
-          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
         // Build a Uint8Array from base64
         const raw = pdfData.startsWith("data:")
