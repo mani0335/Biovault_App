@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera as CapacitorCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { Filesystem, Directory } from "@capacitor/filesystem";
@@ -26,6 +26,7 @@ import { embedSimpleWatermark, extractSimpleWatermark, extractFallbackMetadata, 
 import { analyzeImage, formatAnalysisResult, type ImageAnalysisResult } from "@/lib/imageAnalysis";
 import { computePHashFromBase64, findDuplicates, type DuplicateDocument } from "@/lib/phash";
 import { supabase } from "@/integrations/supabase/client";
+import { logActivityEvent } from "@/lib/activityService";
 import {
   User,
   FileText,
@@ -90,6 +91,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { appStorage } from "@/lib/storage";
+import { SecurePdfViewer } from "@/components/SecurePdfViewer";
 import { ImageCryptoFull } from "@/components/ImageCryptoFull";
 import { VaultManager } from "@/components/VaultManager";
 import { ActivityLogger } from "@/components/ActivityLogger";
@@ -102,17 +104,26 @@ import PortfolioHome from "@/pages/portfolio/PortfolioHome";
 interface VaultDocument {
   id: string;
   name: string;
+  /** Full encrypted binary as base64 or data URL */
   encryptedData: string;
+  /** Preview-ready watermarked image data URL (images only) */
+  encryptedImage?: string;
+  /** Cloudinary / remote URL for the encrypted asset */
   cloudinaryUrl?: string;
-  pageCount?: number;              // Number of pages for documents
-  pHash?: string;                 // Perceptual hash for duplicate detection
+  /** Number of pages (PDF only) */
+  pageCount?: number;
+  /** Perceptual hash for duplicate detection */
+  pHash?: string;
   metadata: {
     timestamp: number;
     original_name: string;
+    /** Actual byte size of the unencrypted file */
     size: number;
+    /** XOR encryption key — REQUIRED for decryption */
     checksum: string;
     encrypted?: boolean;
     ownerId?: string;
+    mimeType?: string;
   };
   createdAt: string;
 }
@@ -408,7 +419,17 @@ function ShareAccessPage() {
 
 export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINITDashboardProps) {
   const navigate = useNavigate();
-  const [currentPage, setCurrentPage] = useState<PageType>("home");
+  const location = useLocation();
+
+  // Read initial tab from navigation state (set by BottomNav when jumping here)
+  const initialTab = (location.state as any)?.tab as PageType | undefined;
+  const [currentPage, setCurrentPage] = useState<PageType>(initialTab || "home");
+
+  // If navigation state changes (user presses back/forward or BottomNav re-navigates), sync tab
+  useEffect(() => {
+    const tab = (location.state as any)?.tab as PageType | undefined;
+    if (tab) setCurrentPage(tab);
+  }, [location.state]);
   
   // Document Upload States - "Pocket" system for scanning
   const [scannedPages, setScannedPages] = useState<string[]>([]); // "pocket" array
@@ -1220,11 +1241,8 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
             label="Home"
             active={currentPage === "home"}
             onClick={() => {
-              try {
-                setCurrentPage("home");
-              } catch (e) {
-                console.error("Error navigating to home:", e);
-              }
+              setCurrentPage("home");
+              navigate("/dashboard", { state: { tab: "home" }, replace: true });
             }}
           />
           <NavButton
@@ -1232,48 +1250,32 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
             label="Vault"
             active={currentPage === "vault"}
             onClick={() => {
-              try {
-                setCurrentPage("vault");
-              } catch (e) {
-                console.error("Error navigating to vault:", e);
-              }
+              setCurrentPage("vault");
+              navigate("/dashboard", { state: { tab: "vault" }, replace: true });
             }}
           />
-                    <NavButton
+          <NavButton
             icon={Plus}
             label="Portfolio"
             active={currentPage === "portfolio"}
             onClick={() => {
-              try {
-                console.log('🚀 Dashboard: Portfolio button clicked, setting currentPage to portfolio');
-                setCurrentPage("portfolio");
-              } catch (e) {
-                console.error("Error navigating to portfolio:", e);
-              }
+              setCurrentPage("portfolio");
+              navigate("/portfolio");
             }}
           />
           <NavButton
             icon={Clock}
             label="Activity"
-            active={currentPage === "activity"}
-            onClick={() => {
-              try {
-                setCurrentPage("activity");
-              } catch (e) {
-                console.error("Error navigating to activity:", e);
-              }
-            }}
+            active={false}
+            onClick={() => navigate("/activity")}
           />
           <NavButton
             icon={User}
             label="Profile"
             active={currentPage === "profile"}
             onClick={() => {
-              try {
-                setCurrentPage("profile");
-              } catch (e) {
-                console.error("Error navigating to profile:", e);
-              }
+              setCurrentPage("profile");
+              navigate("/dashboard", { state: { tab: "profile" }, replace: true });
             }}
           />
         </div>
@@ -1471,6 +1473,61 @@ function HomePage({ userName, documentCount, onEncryptClick, setVerifyProofImage
   );
 }
 
+/**
+ * Resize a raw base64 image to at most `maxDim` pixels on the longest side.
+ *
+ * Returns the resized raw base64 string (no "data:" prefix).
+ * Falls back to the original string on any error (canvas unavailable, etc.).
+ *
+ * Why this exists:
+ *   Android's Capacitor JS→Java bridge serialises every plugin call as JSON.
+ *   A raw photo PNG can be 10–20 MB as base64; Android WebView enforces a
+ *   ~4 MB message limit and crashes silently with a misleading "storage full"
+ *   error.  Resizing to ≤1200 px drops the payload well under the limit.
+ */
+async function resizeBase64Image(
+  base64: string,
+  mimeType: string,
+  maxDim: number
+): Promise<string> {
+  if (typeof Image === 'undefined' || typeof document === 'undefined') {
+    return base64;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width;
+      let h = img.height;
+      if (w <= maxDim && h <= maxDim) {
+        // Already small enough — skip canvas round-trip
+        resolve(base64);
+        return;
+      }
+      const scale = Math.min(maxDim / w, maxDim / h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width  = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(base64); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        // PNG for lossless (preserves watermark LSBs), JPEG for photos
+        const outMime  = mimeType.includes('png') ? 'image/png' : 'image/jpeg';
+        const quality  = outMime === 'image/jpeg' ? 0.85 : undefined;
+        const dataUrl  = canvas.toDataURL(outMime, quality);
+        const commaIdx = dataUrl.indexOf(',');
+        resolve(commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : base64);
+      } catch {
+        resolve(base64);
+      }
+    };
+    img.onerror = () => resolve(base64);
+    img.src = `data:${mimeType};base64,${base64}`;
+  });
+}
+
 // ============= VAULT PAGE =============
 function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selectedShareImage, setSelectedShareImage, setCurrentPage }: { documents: VaultDocument[]; onDeleteDocument?: (docId: string) => void; onStartShare?: () => void; userId?: string | null; selectedShareImage: VaultDocument | null; setSelectedShareImage: React.Dispatch<React.SetStateAction<VaultDocument | null>>; setCurrentPage: React.Dispatch<React.SetStateAction<PageType>> }) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -1556,8 +1613,7 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
         }
       }
 
-      // If the stored data is a lossless PNG watermark, give it a .png extension
-      // so OS apps recognise the format correctly
+      // Fix extension: PNG watermarked files must be saved as .png (lossless)
       let rawFileName = (doc.metadata?.original_name || getSafeName(doc)).replace(/[/\\?%*:|"<>]/g, '_');
       if (
         typeof finalData === 'string' &&
@@ -1567,55 +1623,177 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
         rawFileName = rawFileName.replace(/\.(jpe?g|gif|bmp|webp)$/i, '') + '.png';
       }
       const fileName = rawFileName;
-      const folderName = 'PINIT Vault Documents';
 
-      // Try saving directly to Directory.External (visible in file manager)
-      try {
-        const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      // ─── Step 1: Resolve finalData → guaranteed raw base64 + mimeType ──────────
+      // finalData might be:
+      //   a) "data:image/png;base64,ABC..."  ← data URL
+      //   b) "ABC..."                         ← raw base64
+      //   c) "https://..."                    ← Cloudinary / remote URL (must fetch)
+      let resolvedBase64 = '';
+      let resolvedMime   = 'application/octet-stream';
 
-        // Create folder if needed
-        try {
-          await Filesystem.mkdir({
-            path: folderName,
-            directory: Directory.External,
-            recursive: true,
-          });
-        } catch {
-          // Folder may already exist — ignore
+      const fd = finalData as string;
+      if (fd.startsWith('data:')) {
+        const commaIdx = fd.indexOf(',');
+        resolvedMime   = fd.substring(0, commaIdx).match(/:(.*?);/)?.[1] || resolvedMime;
+        resolvedBase64 = fd.substring(commaIdx + 1).replace(/[\r\n\s]/g, '');
+      } else if (fd.startsWith('http://') || fd.startsWith('https://')) {
+        // Remote URL — fetch binary and convert to base64
+        const resp    = await fetch(fd);
+        resolvedMime  = resp.headers.get('content-type') || resolvedMime;
+        const buf     = await resp.arrayBuffer();
+        const bytes   = new Uint8Array(buf);
+        let bStr = '';
+        const chunkSz = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSz) {
+          bStr += String.fromCharCode(...bytes.subarray(i, i + chunkSz));
         }
-
-        await Filesystem.writeFile({
-          path: `${folderName}/${fileName}`,
-          data: finalData,
-          directory: Directory.External,
-          recursive: true,
-        });
-
-        alert(`✅ Saved!\n\n📁 Android/data/com.biovault.app/files/${folderName}/${fileName}\n\nOpen your file manager to access it.`);
-        return;
-      } catch (extErr) {
-        console.warn('External storage write failed, falling back to share sheet:', extErr);
+        resolvedBase64 = btoa(bStr);
+      } else {
+        // Raw base64 — clean whitespace
+        resolvedBase64 = fd.replace(/[\r\n\s]/g, '');
+        // Detect MIME from magic bytes
+        try {
+          const sample = atob(resolvedBase64.substring(0, 8));
+          if (sample.startsWith('\x89PNG'))    resolvedMime = 'image/png';
+          else if (sample.startsWith('\xFF\xD8')) resolvedMime = 'image/jpeg';
+          else if (sample.startsWith('%PDF'))   resolvedMime = 'application/pdf';
+        } catch { /* keep default */ }
       }
 
-      // Fallback: write to Cache then open share sheet
-      try {
+      if (!resolvedBase64) {
+        alert('❌ No file data found to download.');
+        return;
+      }
+
+      // ─── Capacitor (Android / iOS) ───────────────────────────────────────────
+      const isCapacitor =
+        typeof (window as any).Capacitor !== 'undefined' &&
+        (window as any).Capacitor.isNativePlatform?.();
+
+      if (isCapacitor) {
+        // ── Resize images before passing through the JS→Java bridge ──────────
+        // The bridge serialises the full base64 string as JSON; Android WebView
+        // enforces a ~4 MB message limit.  A 4 K photo PNG can be 15 MB+, which
+        // causes a silent crash reported as "storage full".
+        // Resizing to ≤1200 px keeps the payload well under the limit.
+        if (resolvedMime.startsWith('image/')) {
+          try {
+            console.log('📐 Resizing image for bridge transfer...');
+            resolvedBase64 = await resizeBase64Image(resolvedBase64, resolvedMime, 1200);
+            console.log('✅ Image resized for bridge transfer');
+          } catch (resizeErr) {
+            console.warn('⚠️ Image resize failed, using original:', resizeErr);
+          }
+        }
+
         const { Filesystem, Directory } = await import('@capacitor/filesystem');
-        const { Share } = await import('@capacitor/share');
+        const { registerPlugin } = await import('@capacitor/core');
+        const SaveToDownloads = registerPlugin<{
+          saveFile(o: { fileName: string; data: string; mimeType: string }): Promise<{ success: boolean; path: string }>;
+          saveFileFromUrl(o: { url: string; fileName: string; mimeType: string }): Promise<{ success: boolean; path: string; downloadId: number }>;
+        }>('SaveToDownloads');
 
-        const cacheResult = await Filesystem.writeFile({
-          path: fileName,
-          data: finalData,
-          directory: Directory.Cache,
-          recursive: true,
-        });
+        // ── Path A: If original doc has a Cloudinary URL, use DownloadManager ─
+        // DownloadManager downloads natively on Android — zero bridge data transfer.
+        // NOTE: this downloads the RAW (possibly encrypted) bytes, so we only use it
+        // for non-encrypted documents (encryptedImage already contains the final file).
+        if (doc.cloudinaryUrl && !doc.metadata?.encrypted) {
+          try {
+            console.log('⬇️ Using DownloadManager for direct URL download...');
+            const dlResult = await SaveToDownloads.saveFileFromUrl({
+              url: doc.cloudinaryUrl,
+              fileName,
+              mimeType: resolvedMime,
+            });
+            if (dlResult.success) {
+              alert(`✅ Downloading to Downloads folder!\n\n📥 Check your notification bar — Android will show progress.\nFile: "${fileName}"`);
+              return;
+            }
+          } catch (dmErr) {
+            console.warn('⚠️ DownloadManager path failed, falling back to base64 write:', dmErr);
+          }
+        }
 
-        await Share.share({
-          title: fileName,
-          url: cacheResult.uri,
-          dialogTitle: `Save ${fileName}`,
-        });
-      } catch (shareErr) {
-        alert(`❌ Could not save file:\n\n${shareErr}`);
+        // ── Path B: Write resolved (and resized) base64 to Cache, then save ──
+        let cacheUri = '';
+        try {
+          const cacheResult = await Filesystem.writeFile({
+            path: fileName,
+            data: resolvedBase64,
+            directory: Directory.Cache,
+            recursive: true,
+          });
+          cacheUri = cacheResult.uri;
+        } catch (cacheErr) {
+          console.warn('Cache write failed:', cacheErr);
+          // Last resort: open share sheet with raw data URL so user can save manually
+          try {
+            const { Share } = await import('@capacitor/share');
+            await Share.share({
+              title: fileName,
+              text: `Save "${fileName}" — the file is ready but could not be written to cache.`,
+              dialogTitle: `Save "${fileName}"`,
+            });
+          } catch { /* ignore share errors */ }
+          return;
+        }
+
+        // Try SaveToDownloads plugin (saves directly to Downloads folder, no popup)
+        try {
+          const result = await SaveToDownloads.saveFile({
+            fileName,
+            data: resolvedBase64,
+            mimeType: resolvedMime,
+          });
+
+          if (result.success) {
+            alert(`✅ Saved to Downloads!\n\n📥 Open your Files or Downloads app to find "${fileName}"`);
+            return;
+          }
+        } catch (pluginErr) {
+          console.warn('SaveToDownloads plugin failed, using share sheet:', pluginErr);
+        }
+
+        // Fallback: Share sheet — user picks "Save to Downloads", Drive, etc.
+        try {
+          const { Share } = await import('@capacitor/share');
+          await Share.share({
+            title: fileName,
+            url: cacheUri,
+            dialogTitle: `Save "${fileName}" to your device`,
+          });
+        } catch (shareErr: any) {
+          const msg = (shareErr?.message || '').toLowerCase();
+          if (!msg.includes('abort') && !msg.includes('cancel') && !msg.includes('dismiss')) {
+            alert(`❌ Could not save file.\n\nPlease try again or use a file manager.`);
+          }
+        }
+        return; // ← ALWAYS return on Android — never fall through to web path
+      }
+
+      // ─── Web / PWA fallback (browser <a download>) ───────────────────────────
+      try {
+        const bytes = Uint8Array.from(atob(resolvedBase64), c => c.charCodeAt(0));
+        const blob  = new Blob([bytes], { type: resolvedMime });
+        const url   = URL.createObjectURL(blob);
+        const a     = document.createElement('a');
+        a.href      = url;
+        a.download  = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        logActivityEvent({
+          userId: userId || 'unknown',
+          type: 'downloaded',
+          fileName: doc.metadata?.original_name || getSafeName(doc),
+          fileType: resolvedMime.includes('pdf') ? 'pdf' : 'image',
+          status: 'success',
+          skipGeo: true,
+        }).catch(() => {});
+      } catch (webErr) {
+        alert(`❌ Could not download file:\n\n${webErr}`);
       }
     } catch (err) {
       alert(`❌ Download failed:\n\n${err}`);
@@ -1660,34 +1838,114 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
       let imageUrl = '';
 
       if (doc.encryptedImage) {
-        // encryptedImage may come from backend WITHOUT the data: prefix — normalise it
         const img = doc.encryptedImage.trim();
-        imageUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
+        if (img.startsWith('data:')) {
+          // Already a full data URL — use as-is
+          imageUrl = img;
+        } else if (img.startsWith('http://') || img.startsWith('https://')) {
+          // It's a remote URL (Cloudinary etc.) — use directly as <img src>
+          imageUrl = img;
+        } else if (img.length > 100) {
+          // Raw base64 — detect MIME from magic bytes
+          // iVBOR = PNG, /9j/ = JPEG
+          const isPng = img.startsWith('iVBOR');
+          imageUrl = `data:image/${isPng ? 'png' : 'jpeg'};base64,${img}`;
+        }
       } else if (rawData) {
         if (rawData.startsWith('data:')) {
           // Already a valid data URL (image or PDF) — use as-is
           imageUrl = rawData;
-        } else if (doc.cloudinaryUrl) {
-          // Cloudinary URL is always a valid display URL
-          imageUrl = doc.cloudinaryUrl;
         } else {
           // Raw base64 — detect content type via magic bytes
           try {
             const sample = atob(rawData.substring(0, 8));
-            const isPdf = sample.startsWith('%PDF');
+            const isPdf  = sample.startsWith('%PDF');
+            const isPng  = sample.startsWith('\x89PNG');
             imageUrl = isPdf
               ? `data:application/pdf;base64,${rawData}`
-              : `data:image/jpeg;base64,${rawData}`;
+              : `data:image/${isPng ? 'png' : 'jpeg'};base64,${rawData}`;
           } catch {
             imageUrl = `data:image/jpeg;base64,${rawData}`;
           }
         }
-      } else if (doc.cloudinaryUrl) {
-        imageUrl = doc.cloudinaryUrl;
+      }
+
+      // ── 3. Last resort: fetch from Cloudinary + decrypt ───────────────────
+      // cloudinaryUrl stores ENCRYPTED binary — we must fetch + decrypt it,
+      // NOT use it directly as <img src> (that shows broken image).
+      if (!imageUrl && doc.cloudinaryUrl) {
+        try {
+          console.log('📥 Fetching encrypted data from Cloudinary for preview…');
+          const resp = await fetch(doc.cloudinaryUrl);
+          const buf  = await resp.arrayBuffer();
+          const uint8 = new Uint8Array(buf);
+          let bStr = '';
+          const chunkSz = 8192;
+          for (let i = 0; i < uint8.length; i += chunkSz) {
+            bStr += String.fromCharCode(...uint8.subarray(i, i + chunkSz));
+          }
+          let b64 = btoa(bStr);
+
+          // Decrypt if XOR key is available
+          if (doc.metadata?.encrypted && doc.metadata?.checksum) {
+            try {
+              const { decryptFile } = await import('@/lib/encryptionUtils');
+              b64 = decryptFile(b64, doc.metadata.checksum);
+            } catch { /* use raw if decrypt fails */ }
+          }
+
+          if (b64.startsWith('data:')) {
+            imageUrl = b64;
+          } else {
+            try {
+              const sample = atob(b64.substring(0, 8));
+              const isPdf  = sample.startsWith('%PDF');
+              const isPng  = sample.startsWith('\x89PNG');
+              imageUrl = isPdf
+                ? `data:application/pdf;base64,${b64}`
+                : `data:image/${isPng ? 'png' : 'jpeg'};base64,${b64}`;
+            } catch {
+              imageUrl = `data:image/jpeg;base64,${b64}`;
+            }
+          }
+          console.log('✅ Cloudinary fetch + decrypt complete for preview');
+        } catch (fetchErr) {
+          console.warn('⚠️ Cloudinary fetch for preview failed:', fetchErr);
+        }
+      }
+
+      // ── Resize image data URLs before handing to WebView ─────────────────
+      // Android WebView cannot render data: URLs larger than ~5 MB.
+      // A 4 K photo PNG can be 15 MB+ as base64; resizing to ≤900 px makes it
+      // displayable while still showing a sharp thumbnail on mobile screens.
+      if (imageUrl && imageUrl.startsWith('data:image/')) {
+        try {
+          const semicolonIdx = imageUrl.indexOf(';');
+          const commaIdx    = imageUrl.indexOf(',');
+          if (semicolonIdx > 5 && commaIdx > semicolonIdx) {
+            const mime   = imageUrl.substring(5, semicolonIdx);   // e.g. "image/png"
+            const rawB64 = imageUrl.substring(commaIdx + 1);
+            const resizedB64 = await resizeBase64Image(rawB64, mime, 900);
+            imageUrl = `data:${mime};base64,${resizedB64}`;
+            console.log('📐 Preview image resized for WebView rendering');
+          }
+        } catch (resizeErr) {
+          console.warn('⚠️ Preview resize failed, using original:', resizeErr);
+        }
       }
 
       setPreviewImage(imageUrl || null);
       setSelectedDoc(doc);
+
+      // Log preview activity
+      logActivityEvent({
+        userId: userId || 'unknown',
+        type: 'preview',
+        fileName: doc.metadata?.original_name || getSafeName(doc),
+        fileType: imageUrl?.includes('application/pdf') ? 'pdf' : 'image',
+        status: 'success',
+        skipGeo: true,
+      }).catch(() => {});
 
       // Only try to extract metadata if we have the encrypted image
       if (doc.encryptedImage) {
@@ -1826,24 +2084,14 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
                 />
               </div>
             ) : (
-              /* ── PDF / document — iframe first, "Open" fallback ── */
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                {/* iframe handles PDFs natively in Chrome WebView */}
-                <iframe
-                  src={fullscreenPreview.dataUrl}
-                  title={fullscreenPreview.name}
-                  style={{ flex: 1, border: 'none', width: '100%', minHeight: '70vh' }}
+              /* ── PDF / document — secure in-app viewer ── */
+              <div style={{ height: '85vh' }}>
+                <SecurePdfViewer
+                  pdfData={fullscreenPreview.dataUrl}
+                  fileName={fullscreenPreview.name}
+                  downloadEnabled={false}
+                  onClose={() => setFullscreenPreview(null)}
                 />
-                {/* Always show "Open with app" as secondary action for Android */}
-                <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: 10, alignItems: 'center', background: 'rgba(0,0,0,0.6)' }}>
-                  <span style={{ color: '#94a3b8', fontSize: 12, flex: 1 }}>If the PDF doesn't display, tap Open to use a PDF viewer app.</span>
-                  <button
-                    onClick={() => openPdfPreview(fullscreenPreview.dataUrl, fullscreenPreview.name)}
-                    style={{ background: 'linear-gradient(135deg,#06b6d4,#8b5cf6)', color: 'white', border: 'none', borderRadius: 12, padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
-                  >
-                    📂 Open
-                  </button>
-                </div>
               </div>
             )}
           </div>
@@ -1874,31 +2122,19 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
           <X size={24} className="text-white" />
         </button>
 
-        {/* Document preview — image inline, PDF via native open */}
+        {/* Document preview — PDF rendered in-app, images shown inline */}
         <div className="flex-1 flex items-center justify-center w-full max-w-2xl py-8">
           {previewImage.startsWith('data:application/pdf') ||
            previewImage.startsWith('blob:') ||
            (selectedDoc.metadata?.original_name || getSafeName(selectedDoc)).toLowerCase().endsWith('.pdf') ? (
-            <div style={{ textAlign: 'center', color: 'white', maxWidth: 320, padding: 24 }}>
-              <div style={{ fontSize: 80, marginBottom: 20, lineHeight: 1 }}>📄</div>
-              <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 10, wordBreak: 'break-all' }}>
-                {selectedDoc.metadata?.original_name || getSafeName(selectedDoc)}
-              </p>
-              <p style={{ color: 'rgba(148,163,184,1)', fontSize: 14, marginBottom: 28, lineHeight: 1.5 }}>
-                PDF documents cannot be displayed inline.{'\n'}
-                Tap below to open with your PDF viewer app.
-              </p>
-              <button
-                onClick={() => openPdfPreview(previewImage, selectedDoc.metadata?.original_name || getSafeName(selectedDoc))}
-                style={{
-                  background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)',
-                  color: 'white', border: 'none', borderRadius: 14,
-                  padding: '14px 32px', fontSize: 15, fontWeight: 700,
-                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
-                }}
-              >
-                📂 Open PDF
-              </button>
+            /* ── Secure in-app PDF viewer ───────────────────────────── */
+            <div style={{ width: '100%', height: '70vh', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(139,92,246,0.3)' }}>
+              <SecurePdfViewer
+                pdfData={previewImage}
+                fileName={selectedDoc.metadata?.original_name || getSafeName(selectedDoc)}
+                downloadEnabled={false}
+                onClose={() => { setSelectedDoc(null); setPreviewImage(null); }}
+              />
             </div>
           ) : (
             <img
@@ -2663,6 +2899,11 @@ function EncryptPreviewPage({
       
       setEncryptedImage(embeddedImageBase64);
       
+      // Compute actual byte size of the source image for accurate metadata
+      const imageBytes = Math.round((image.replace(/^data:[^,]+,/, '').length * 3) / 4);
+      // Generate a stable key for this image (used as checksum / no XOR encryption for camera images)
+      const imgKey = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+
       // Create encryption package
       const encryptedPackage = {
         encrypted_data: image,
@@ -2671,11 +2912,16 @@ function EncryptPreviewPage({
           userId: userId,
           timestamp: new Date().toISOString(),
           encryptionMethod: encryptionMethod,
-          size: image.length,
-          original_name: `encrypted_vault_${userId}_${Date.now()}.jpg`,
-          ownerId: userId
+          // Actual byte size (not string length) — fixes "0 Bytes" display
+          size: imageBytes,
+          original_name: `encrypted_vault_${userId}_${Date.now()}.png`,
+          ownerId: userId,
+          // checksum is the decryption key — MUST be persisted for decryption after reload
+          checksum: imgKey,
+          encrypted: false,  // Camera images use watermark embedding, not XOR encryption
+          mimeType: 'image/png',
         },
-        check_digest: Math.random().toString(36).substring(7),
+        check_digest: imgKey,
       };
       
       setEncryptedData(encryptedPackage);
@@ -2902,16 +3148,18 @@ function SharePage({
   downloadRequests: any[];
   setDownloadRequests: React.Dispatch<React.SetStateAction<any[]>>;
 }) {
+  const [isGeneratingShare, setIsGeneratingShare] = useState(false);
+
   const generateShareLink = () => {
-    // Generate unique share ID
     const shareId = `share_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const baseUrl = window.location.origin;
-    const link = `${baseUrl}/share/${shareId}`;
-    return link;
+    return `${baseUrl}/share/${shareId}`;
   };
 
   const handleGenerateShare = async () => {
+    if (isGeneratingShare) return;
     try {
+      setIsGeneratingShare(true);
       if (!selectedShareImage) {
         alert("❌ Please select a document to share.");
         return;
@@ -3130,89 +3378,110 @@ function SharePage({
         insertPayload.vault_image_id = imageUrlForShare;
       }
 
-      // Helper: is this a "column not found in schema cache" error?
-      const isSchemaError = (e: any) =>
-        e?.code === 'PGRST204' || (e?.message || '').toLowerCase().includes('schema cache');
-
-      // ── Attempt 1: full payload (with image URL + new access-control columns) ──
+      // ── Insert with progressive column-stripping fallback ────────────────────
+      // Attempt 1: full payload (image + access-control columns)
+      // Attempt 2: drop vault_image_id (too large for some DB configs)
+      // Attempt 3: also drop print_blocked / device_restriction / geo_restriction
+      //            (these need a DB migration — strip them if the column doesn't exist yet)
+      // Attempt 4: bare minimum — core share fields only
       let insertOk = false;
-      const { error: supabaseError } = await supabase
-        .from('share_configs')
-        .insert(insertPayload);
 
-      if (!supabaseError) {
+      const tryInsert = async (payload: Record<string, unknown>) => {
+        const { error } = await supabase.from('share_configs').insert(payload);
+        return error;
+      };
+
+      // Attempt 1
+      let lastError = await tryInsert(insertPayload);
+      if (!lastError) {
         insertOk = true;
-        console.log('✅ Share saved to Supabase (full payload)');
-      } else {
-        console.warn('⚠️ Share insert attempt 1 failed:', supabaseError.code, supabaseError.message);
+        console.log('✅ Share saved (full payload)');
+      }
 
-        // ── Attempt 2: drop image URL (large value can exceed column limits) ──
+      // Attempt 2 — drop large image data
+      if (!insertOk) {
+        console.warn('⚠️ Attempt 1 failed:', lastError?.code, lastError?.message);
         delete insertPayload.vault_image_id;
-        const { error: err2 } = await supabase.from('share_configs').insert(insertPayload);
-        if (!err2) {
+        lastError = await tryInsert(insertPayload);
+        if (!lastError) {
           insertOk = true;
-          console.log('✅ Share saved to Supabase (without image URL)');
-        } else {
-          console.warn('⚠️ Attempt 2 failed:', err2.code, err2.message);
-
-          // ── Attempt 3: also drop new columns that may not exist yet (PGRST204) ──
-          if (isSchemaError(err2) || isSchemaError(supabaseError)) {
-            delete (insertPayload as any).print_blocked;
-            delete (insertPayload as any).device_restriction;
-            delete (insertPayload as any).geo_restriction;
-            const { error: err3 } = await supabase.from('share_configs').insert(insertPayload);
-            if (!err3) {
-              insertOk = true;
-              console.log('✅ Share saved without new access-control columns (run SQL migration to enable them)');
-            } else {
-              // ── Attempt 4: also drop vault_image_id ──────────────────────
-              delete (insertPayload as any).vault_image_id;
-              const { error: err4 } = await supabase.from('share_configs').insert(insertPayload);
-              if (!err4) {
-                insertOk = true;
-                console.log('✅ Share saved (minimal payload)');
-              } else {
-                console.error('❌ All insert attempts failed:', err4);
-                alert(
-                  `⚠️ Share link was created locally but COULD NOT be saved to the server.\n\n` +
-                  `Error: ${err4.message}\nCode: ${err4.code}\n\n` +
-                  `The link will NOT work for others until this is resolved.`
-                );
-                return;
-              }
-            }
-          } else {
-            console.error('❌ Supabase insert failed:', err2);
-            alert(
-              `⚠️ Share link was created locally but COULD NOT be saved to the server.\n\n` +
-              `Error: ${err2.message}\nCode: ${err2.code}\n\n` +
-              `The link will NOT work for others until this is resolved.`
-            );
-            return;
-          }
+          console.log('✅ Share saved (no image)');
         }
       }
 
-      if (!insertOk) return; // guard (should not reach here)
+      // Attempt 3 — drop new access-control columns (not in DB yet)
+      if (!insertOk) {
+        console.warn('⚠️ Attempt 2 failed:', lastError?.code, lastError?.message);
+        delete (insertPayload as any).print_blocked;
+        delete (insertPayload as any).device_restriction;
+        delete (insertPayload as any).geo_restriction;
+        lastError = await tryInsert(insertPayload);
+        if (!lastError) {
+          insertOk = true;
+          console.log('✅ Share saved (no access-control columns — run SQL migration to enable them)');
+        }
+      }
 
-      // Add to local UI state
-      setShareConfigs([...shareConfigs, config]);
+      // Attempt 4 — absolute minimum: only core required columns
+      if (!insertOk) {
+        console.warn('⚠️ Attempt 3 failed:', lastError?.code, lastError?.message);
+        const minPayload: Record<string, unknown> = {
+          share_id:      insertPayload.share_id,
+          user_id:       insertPayload.user_id,
+          share_link:    insertPayload.share_link,
+          download_limit: insertPayload.download_limit,
+          downloads_used: 0,
+          is_active:     true,
+          access_count:  0,
+          created_by:    insertPayload.created_by,
+        };
+        lastError = await tryInsert(minPayload);
+        if (!lastError) {
+          insertOk = true;
+          console.log('✅ Share saved (minimal payload)');
+        } else {
+          console.error('❌ All insert attempts failed:', lastError);
+          alert(
+            `⚠️ Share link created but could NOT be saved to server.\n\n` +
+            `Error: ${lastError.message} (${lastError.code})\n\n` +
+            `The link will NOT work for others until resolved.`
+          );
+          // ← Do NOT return — still show the QR code / link locally
+        }
+      }
 
-      // Add to history
-      setShareHistory([...shareHistory, {
+      // Add to local UI state regardless of insert result
+      setShareConfigs([config, ...shareConfigs]);
+      setShareHistory([{
         id: config.id,
         action: "Share Created",
         document: selectedShareImage.name || "Unknown",
-        config: config,
+        config,
         timestamp: new Date().toLocaleString(),
-      }]);
+      }, ...shareHistory]);
 
-      console.log("✅ Share link generated successfully:", shareLink);
-      alert("✅ Share link created! Your friend can scan the QR code or use the link to access it.");
+      // Log share activity
+      logActivityEvent({
+        userId: userId || 'unknown',
+        shareId: shareId,
+        type: 'shared',
+        fileName: selectedShareImage?.name || 'Vault file',
+        fileType: selectedShareImage?.name?.endsWith('.pdf') ? 'pdf' : 'image',
+        sharedBy: userId || 'unknown',
+        status: 'success',
+        skipGeo: true,
+      }).catch(() => {});
+
+      // Always advance to preview so user sees the QR code and link
       setShareStep("preview");
+      if (insertOk) {
+        alert("✅ Share link created! Share the QR code or link with your friend.");
+      }
     } catch (error) {
       console.error("❌ Error generating share link:", error);
       alert(`❌ Failed to generate share link: ${(error as any)?.message || String(error)}`);
+    } finally {
+      setIsGeneratingShare(false);
     }
   };
 
@@ -3539,17 +3808,11 @@ function SharePage({
             </div>
 
             <Button
-              onClick={async () => {
-                try {
-                  await handleGenerateShare();
-                } catch (err) {
-                  console.error("❌ Share button error:", err);
-                  alert(`❌ Share error: ${(err as any)?.message || String(err)}`);
-                }
-              }}
-              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold shadow-lg hover:shadow-xl transition-all mt-4"
+              onClick={handleGenerateShare}
+              disabled={isGeneratingShare}
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold shadow-lg hover:shadow-xl transition-all mt-4 disabled:opacity-60"
             >
-              ✨ Generate Share Link
+              {isGeneratingShare ? '⏳ Generating...' : '✨ Generate Share Link'}
             </Button>
           </div>
         </motion.div>

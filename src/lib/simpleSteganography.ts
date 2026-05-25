@@ -29,19 +29,30 @@ export async function embedSimpleWatermark(
     img.onload = () => {
       try {
         console.log('🎨 Starting simple watermark embedding...');
-        
+
         // Check if document and canvas are available
         if (typeof document === 'undefined' || typeof document.createElement === 'undefined') {
           throw new Error('Document or createElement not available');
         }
-        
+
+        // ── Resize to max 1200px to keep PNG small, fast, and within localStorage limits ──
+        const MAX_DIM = 1200;
+        let drawW = img.width;
+        let drawH = img.height;
+        if (drawW > MAX_DIM || drawH > MAX_DIM) {
+          const scale = Math.min(MAX_DIM / drawW, MAX_DIM / drawH);
+          drawW = Math.round(drawW * scale);
+          drawH = Math.round(drawH * scale);
+          console.log(`📐 Resized for watermark: ${img.width}x${img.height} → ${drawW}x${drawH}`);
+        }
+
         const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = drawW;
+        canvas.height = drawH;
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Cannot get canvas context');
 
-        ctx.drawImage(img, 0, 0);
+        ctx.drawImage(img, 0, 0, drawW, drawH);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
 

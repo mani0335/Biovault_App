@@ -10,6 +10,7 @@ import {
 import { encryptFile } from "@/lib/encryptionUtils";
 import { addDocumentToVault } from "@/lib/vaultService";
 import { appStorage } from "@/lib/storage";
+import { logActivityEvent } from "@/lib/activityService";
 
 interface UploadFromDeviceProps {
   onBack: () => void;
@@ -131,26 +132,42 @@ export default function UploadFromDevice({
             id: `doc_${Date.now()}`,
             name: document.name,
             encryptedData: encrypted,
+            // No encryptedImage for non-image file types
+            encryptedImage: document.type.startsWith('image/')
+              ? (fileBase64 as string)   // use original for preview
+              : undefined,
             metadata: {
               timestamp: Date.now(),
               original_name: document.name,
+              // Use the actual File.size (bytes) — NOT the base64 string length
               size: document.size,
+              // XOR key — REQUIRED for later decryption
               checksum: key,
               encrypted: true,
               ownerId: userId,
+              mimeType: document.type,
             },
             createdAt: new Date().toISOString(),
           };
 
           await addDocumentToVault(userId, newDocument);
 
+          logActivityEvent({
+            userId,
+            type: 'upload',
+            fileName: document.name,
+            fileType: document.type.includes('pdf') ? 'pdf' : 'image',
+            status: 'success',
+            skipGeo: true,
+          }).catch(() => {});
+
           setMessage(`✅ File uploaded and encrypted: ${document.name}`);
 
           console.log("✅ Document saved:", {
             id: newDocument.id,
-            fileName: newDocument.fileName,
-            fileType,
-            encrypted: newDocument.isEncrypted,
+            name: newDocument.name,
+            size: newDocument.metadata.size,
+            encrypted: newDocument.metadata.encrypted,
           });
 
           // Navigate to vault

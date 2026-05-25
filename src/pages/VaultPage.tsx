@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { SecurePdfViewer } from "@/components/SecurePdfViewer";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { motion, AnimatePresence } from "framer-motion";
@@ -291,25 +292,14 @@ export default function VaultPage({ onBack }: VaultPageProps) {
                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 0 60px rgba(0,0,0,0.9)' }}
               />
             ) : (
-              /* ── PDF / document — open natively ── */
-              <div style={{ textAlign: 'center', color: 'white', maxWidth: 320 }}>
-                <div style={{ fontSize: 72, marginBottom: 16, lineHeight: 1 }}>📄</div>
-                <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, wordBreak: 'break-all' }}>{fullscreenPreview.name}</p>
-                <p style={{ color: 'rgba(148,163,184,1)', fontSize: 13, marginBottom: 28 }}>
-                  PDF documents cannot be displayed inline on Android.
-                  Tap below to open with your PDF viewer app.
-                </p>
-                <button
-                  onClick={() => openPdfNatively(fullscreenPreview.dataUrl, fullscreenPreview.name)}
-                  style={{
-                    background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)',
-                    color: 'white', border: 'none', borderRadius: 14,
-                    padding: '14px 32px', fontSize: 15, fontWeight: 700,
-                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
-                  }}
-                >
-                  📂 Open PDF
-                </button>
+              /* ── PDF / document — inline SecurePdfViewer ── */
+              <div style={{ width: '100%', height: '100%', minHeight: '70vh' }} onClick={e => e.stopPropagation()}>
+                <SecurePdfViewer
+                  pdfData={fullscreenPreview.dataUrl}
+                  fileName={fullscreenPreview.name}
+                  downloadEnabled={true}
+                  onClose={() => setFullscreenPreview(null)}
+                />
               </div>
             )}
           </div>

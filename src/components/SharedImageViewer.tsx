@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -7,6 +7,8 @@ import {
   CheckCircle, RefreshCw, MapPin, Monitor, XCircle, Bell,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { logActivityEvent, logSecurityEventSync } from '@/lib/activityService';
+import { SecurePdfViewer } from '@/components/SecurePdfViewer';
 
 interface ShareConfig {
   share_id: string;
@@ -45,6 +47,12 @@ export const SharedImageViewer: React.FC = () => {
   // Print block modal
   const [showPrintModal, setShowPrintModal] = useState(false);
 
+  // Inline PDF viewer
+  const [showPdfViewer, setShowPdfViewer] = useState(false);
+
+  // Session timer for activity tracking
+  const sessionStartRef = useRef<number>(Date.now());
+
   // Download request
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [requestName, setRequestName] = useState('');
@@ -59,6 +67,45 @@ export const SharedImageViewer: React.FC = () => {
     return () => { document.body.style.background = ''; };
   }, []);
 
+  // Log session_end with duration when user leaves the page
+  useEffect(() => {
+    if (!shareData) return;
+    sessionStartRef.current = Date.now();
+    return () => {
+      const duration = Math.round((Date.now() - sessionStartRef.current) / 1000);
+      if (duration > 2) {
+        logActivityEvent({
+          userId: shareData.user_id,
+          shareId: shareData.share_id,
+          type: 'session_end',
+          fileName: shareData.image_name || 'Shared file',
+          fileType: shareData.vault_image_id?.startsWith('data:application/pdf') ? 'pdf' : 'image',
+          status: 'success',
+          sessionDuration: duration,
+          skipGeo: true,
+        }).catch(() => {});
+      }
+    };
+  }, [shareData?.share_id]);
+
+  // Tab-switch detection (security monitoring)
+  useEffect(() => {
+    if (!shareData) return;
+    const handleVisibility = () => {
+      if (document.hidden) {
+        logSecurityEventSync(
+          shareData.user_id,
+          shareData.share_id,
+          'tab_switch',
+          shareData.image_name || 'Shared file',
+          'User switched tabs'
+        );
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [shareData?.share_id]);
+
   // Print blocking — intercept Ctrl+P and beforeprint event
   useEffect(() => {
     if (!shareData?.print_blocked) return;
@@ -66,11 +113,17 @@ export const SharedImageViewer: React.FC = () => {
     const handleBeforePrint = (e: Event) => {
       e.preventDefault();
       setShowPrintModal(true);
+      if (shareData) {
+        logSecurityEventSync(shareData.user_id, shareData.share_id, 'print_attempted', shareData.image_name || 'Shared file', 'beforeprint event');
+      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
         setShowPrintModal(true);
+        if (shareData) {
+          logSecurityEventSync(shareData.user_id, shareData.share_id, 'print_attempted', shareData.image_name || 'Shared file', 'Ctrl+P');
+        }
       }
     };
 
@@ -115,6 +168,15 @@ export const SharedImageViewer: React.FC = () => {
 
         if (!row.is_active) {
           setError('This share link has been disabled by the owner.');
+          logActivityEvent({
+            userId: row.user_id,
+            shareId: token,
+            type: 'session_blocked',
+            fileName: row.image_name || 'Shared file',
+            fileType: row.vault_image_id?.startsWith('data:application/pdf') ? 'pdf' : 'image',
+            status: 'blocked',
+            securityEvents: ['session_blocked'],
+          }).catch(() => {});
           setLoading(false);
           return;
         }
@@ -124,6 +186,14 @@ export const SharedImageViewer: React.FC = () => {
           setErrorType('expired');
           setError('This share link has expired.');
           setShareData(row);
+          logActivityEvent({
+            userId: row.user_id,
+            shareId: token,
+            type: 'link_expired',
+            fileName: row.image_name || 'Shared file',
+            fileType: row.vault_image_id?.startsWith('data:application/pdf') ? 'pdf' : 'image',
+            status: 'denied',
+          }).catch(() => {});
           setLoading(false);
           return;
         }
@@ -136,6 +206,15 @@ export const SharedImageViewer: React.FC = () => {
             setErrorType('device_blocked');
             setError('This document is only accessible from a desktop or laptop device.');
             setShareData(row);
+            logActivityEvent({
+              userId: row.user_id,
+              shareId: token,
+              type: 'access_denied',
+              fileName: row.image_name || 'Shared file',
+              fileType: 'unknown',
+              status: 'denied',
+              securityEvents: ['device_blocked'],
+            }).catch(() => {});
             setLoading(false);
             return;
           }
@@ -143,6 +222,15 @@ export const SharedImageViewer: React.FC = () => {
             setErrorType('device_blocked');
             setError('This document is only accessible from a mobile device.');
             setShareData(row);
+            logActivityEvent({
+              userId: row.user_id,
+              shareId: token,
+              type: 'access_denied',
+              fileName: row.image_name || 'Shared file',
+              fileType: 'unknown',
+              status: 'denied',
+              securityEvents: ['device_blocked'],
+            }).catch(() => {});
             setLoading(false);
             return;
           }
@@ -161,6 +249,15 @@ export const SharedImageViewer: React.FC = () => {
                 setErrorType('geo_blocked');
                 setError(`This document is not available in your region (${cc}).`);
                 setShareData(row);
+                logActivityEvent({
+                  userId: row.user_id,
+                  shareId: token,
+                  type: 'access_denied',
+                  fileName: row.image_name || 'Shared file',
+                  fileType: 'unknown',
+                  status: 'denied',
+                  securityEvents: ['geo_blocked'],
+                }).catch(() => {});
                 setLoading(false);
                 return;
               }
@@ -175,6 +272,14 @@ export const SharedImageViewer: React.FC = () => {
           setErrorType('download_limit');
           setError(`Download limit of ${row.download_limit} has been reached.`);
           setShareData(row);
+          logActivityEvent({
+            userId: row.user_id,
+            shareId: token,
+            type: 'download_limit_reached',
+            fileName: row.image_name || 'Shared file',
+            fileType: 'unknown',
+            status: 'denied',
+          }).catch(() => {});
           setLoading(false);
           return;
         }
@@ -185,6 +290,18 @@ export const SharedImageViewer: React.FC = () => {
           .update({ access_count: (row.access_count || 0) + 1 })
           .eq('share_id', token)
           .then(() => {});
+
+        // ── Log successful access ────────────────────────────────────────
+        const isFirstAccess = (row.access_count || 0) === 0;
+        logActivityEvent({
+          userId: row.user_id,
+          shareId: token,
+          type: isFirstAccess ? 'opened' : 're_accessed',
+          fileName: row.image_name || 'Shared file',
+          fileType: row.vault_image_id?.startsWith('data:application/pdf') ? 'pdf' : 'image',
+          status: 'success',
+          viewCount: (row.access_count || 0) + 1,
+        }).catch(() => {});
 
         setShareData(row);
       } catch (err) {
@@ -209,8 +326,25 @@ export const SharedImageViewer: React.FC = () => {
       .maybeSingle();
     if (data) {
       setUnlocked(true);
+      logActivityEvent({
+        userId: shareData.user_id,
+        shareId: token,
+        type: 'viewed',
+        fileName: shareData.image_name || 'Shared file',
+        fileType: shareData.vault_image_id?.startsWith('data:application/pdf') ? 'pdf' : 'image',
+        status: 'success',
+      }).catch(() => {});
     } else {
       alert('❌ Incorrect password. Please try again.');
+      logActivityEvent({
+        userId: shareData.user_id,
+        shareId: token,
+        type: 'password_failed',
+        fileName: shareData.image_name || 'Shared file',
+        fileType: 'unknown',
+        status: 'denied',
+        securityEvents: ['password_failed'],
+      }).catch(() => {});
     }
   };
 
@@ -229,6 +363,14 @@ export const SharedImageViewer: React.FC = () => {
         setErrorType('download_limit');
         setError(`Download limit of ${shareData.download_limit} has been reached.`);
         setShareData(prev => prev ? { ...prev, downloads_used: usedNow } : prev);
+        logActivityEvent({
+          userId: shareData.user_id,
+          shareId: token || '',
+          type: 'download_limit_reached',
+          fileName: shareData.image_name || 'Shared file',
+          fileType: 'unknown',
+          status: 'denied',
+        }).catch(() => {});
         return;
       }
     }
@@ -252,6 +394,16 @@ export const SharedImageViewer: React.FC = () => {
         .then(() => {});
 
       setShareData(prev => prev ? { ...prev, downloads_used: newUsed } : prev);
+
+      logActivityEvent({
+        userId: shareData.user_id,
+        shareId: token || '',
+        type: 'downloaded',
+        fileName: filename,
+        fileType: isPdf ? 'pdf' : 'image',
+        status: 'success',
+        downloadAttempts: newUsed,
+      }).catch(() => {});
 
       if (shareData.download_limit && newUsed >= shareData.download_limit) {
         setErrorType('download_limit');
@@ -527,9 +679,17 @@ export const SharedImageViewer: React.FC = () => {
 
   // ─── Content type detection ────────────────────────────────────────────────
   const contentUrl = shareData.vault_image_id || null;
-  const isPdfContent = !!contentUrl && contentUrl.startsWith('data:application/pdf');
-  const isImageContent = !!contentUrl && contentUrl.startsWith('data:image') && !imgError;
+  // Detect PDF: by data URL prefix OR by filename extension (when data URL has wrong prefix)
+  const fileNameLower = (shareData.image_name || '').toLowerCase();
+  const isPdfByName = fileNameLower.endsWith('.pdf');
+  const isPdfContent = !!contentUrl && (
+    contentUrl.startsWith('data:application/pdf') ||
+    (isPdfByName && contentUrl.startsWith('data:'))
+  );
+  const isImageContent = !!contentUrl && contentUrl.startsWith('data:image') && !imgError && !isPdfByName;
   const hasContent = isPdfContent || isImageContent;
+  // When filename says PDF but vault_image_id is null → show placeholder not "Open PDF"
+  const isPdfNoData = isPdfByName && !contentUrl;
 
   // download_limit === null → downloads DISABLED (view only) → show Request button
   // download_limit !== null → downloads ENABLED up to limit
@@ -608,36 +768,40 @@ export const SharedImageViewer: React.FC = () => {
           </div>
         </div>
 
-        {/* ── PDF PREVIEW ──────────────────────────────────────────────────── */}
+        {/* ── PDF PREVIEW — inline SecurePdfViewer ─────────────────────────── */}
         {isPdfContent && (
           <motion.div initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
             className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden mb-4">
-            <div className="bg-green-900/30 border-b border-green-700/40 px-4 py-3 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-green-400 flex-shrink-0" />
-              <span className="text-green-300 text-sm font-medium">✅ Verified PINIT Share</span>
-            </div>
-            <div className="bg-slate-900 flex flex-col items-center justify-center p-8 min-h-48 gap-4">
-              <div className="w-20 h-20 rounded-2xl bg-red-900/40 border border-red-700/40 flex items-center justify-center">
-                <FileText className="w-10 h-10 text-red-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-white font-semibold text-base">{shareData.image_name || 'PDF Document'}</p>
-                <p className="text-slate-400 text-sm mt-1">PDF Document</p>
-              </div>
-              <button onClick={openPdf}
-                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all flex items-center gap-2">
-                <FileText className="w-4 h-4" /> Open PDF
-              </button>
-            </div>
-            <div className="px-4 py-3 flex items-center justify-between border-t border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-xs">
-                <FileText className="w-4 h-4" />
-                <span className="truncate max-w-[160px]">{shareData.image_name || 'PDF Document'}</span>
+
+            {/* Verified badge */}
+            <div className="bg-green-900/30 border-b border-green-700/40 px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-green-400 flex-shrink-0" />
+                <span className="text-green-300 text-sm font-medium">✅ Verified PINIT Share</span>
               </div>
               <div className="flex items-center gap-2 text-slate-500 text-xs">
                 <Eye className="w-3.5 h-3.5" />
                 <span>{shareData.access_count || 1} view{(shareData.access_count || 1) !== 1 ? 's' : ''}</span>
               </div>
+            </div>
+
+            {/* Inline PDF viewer — always shown, no "Open PDF" button */}
+            <div style={{ height: '75vh', borderRadius: 0 }}>
+              <SecurePdfViewer
+                pdfData={contentUrl!}
+                fileName={shareData.image_name || 'document.pdf'}
+                downloadEnabled={downloadsEnabled && !limitReached}
+                onClose={undefined}
+              />
+            </div>
+
+            {/* Footer bar */}
+            <div className="px-4 py-3 flex items-center gap-2 border-t border-slate-700 bg-slate-900/60">
+              <FileText className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <span className="text-slate-300 text-xs font-medium truncate flex-1">
+                {shareData.image_name || 'PDF Document'}
+              </span>
+              <span className="text-xs bg-red-900/30 border border-red-700/40 text-red-300 px-2 py-0.5 rounded-full">PDF</span>
             </div>
           </motion.div>
         )}
@@ -669,12 +833,33 @@ export const SharedImageViewer: React.FC = () => {
         )}
 
         {/* ── NO PREVIEW FALLBACK ───────────────────────────────────────────── */}
-        {!hasContent && (
+        {!hasContent && !isPdfNoData && (
           <motion.div initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
             className="bg-slate-800 border border-slate-700 rounded-2xl p-6 mb-4 text-center">
             <Image className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <p className="text-slate-400 text-sm">Preview not available.</p>
             <p className="text-slate-500 text-xs mt-1">The sender may need to re-share this file.</p>
+          </motion.div>
+        )}
+
+        {/* ── PDF with no stored data — show secure placeholder ─────────────── */}
+        {isPdfNoData && (
+          <motion.div initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+            className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden mb-4">
+            <div className="bg-green-900/30 border-b border-green-700/40 px-4 py-3 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <span className="text-green-300 text-sm font-medium">✅ Verified PINIT Share</span>
+            </div>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <FileText className="w-8 h-8 text-red-400" />
+              </div>
+              <p className="text-white font-semibold text-base mb-1">{shareData.image_name}</p>
+              <p className="text-slate-400 text-sm mb-3">PDF Document</p>
+              <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3 text-amber-300 text-xs">
+                🔒 This PDF is secured. Please request access from the document owner to view its contents.
+              </div>
+            </div>
           </motion.div>
         )}
 
