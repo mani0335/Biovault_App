@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera as CapacitorCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { Filesystem, Directory } from "@capacitor/filesystem";
@@ -404,7 +404,17 @@ function ShareAccessPage() {
 
 export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINITDashboardProps) {
   const navigate = useNavigate();
-  const [currentPage, setCurrentPage] = useState<PageType>("home");
+  const location = useLocation();
+
+  // Read initial tab from navigation state (set by BottomNav when jumping here)
+  const initialTab = (location.state as any)?.tab as PageType | undefined;
+  const [currentPage, setCurrentPage] = useState<PageType>(initialTab || "home");
+
+  // If navigation state changes (user presses BottomNav while already on dashboard), sync tab
+  useEffect(() => {
+    const tab = (location.state as any)?.tab as PageType | undefined;
+    if (tab) setCurrentPage(tab);
+  }, [location.state]);
   
   // Document Upload States - "Pocket" system for scanning
   const [scannedPages, setScannedPages] = useState<string[]>([]); // "pocket" array
@@ -1225,14 +1235,8 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
           <NavButton
             icon={Clock}
             label="Activity"
-            active={currentPage === "activity"}
-            onClick={() => {
-              try {
-                setCurrentPage("activity");
-              } catch (e) {
-                console.error("Error navigating to activity:", e);
-              }
-            }}
+            active={false}
+            onClick={() => navigate("/activity")}
           />
           <NavButton
             icon={User}

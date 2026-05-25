@@ -6,15 +6,29 @@ export default function BottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Each tab config: where to navigate and what state to pass.
+  // Vault, Profile, and Home all live inside /dashboard (PINITVaultDashboard).
+  // We pass { tab } in location.state so Dashboard opens the right internal tab.
   const tabs = [
-    { id: 'home',      label: 'Home',      icon: Home,       path: '/dashboard' },
-    { id: 'vault',     label: 'Vault',     icon: Shield,     path: '/vault' },
-    { id: 'portfolio', label: 'Portfolio', icon: LayoutGrid, path: '/portfolio' },
-    { id: 'activity',  label: 'Activity',  icon: Clock,      path: '/dashboard' },
-    { id: 'profile',   label: 'Profile',   icon: User,       path: '/profile' },
-  ];
+    { id: 'home',      label: 'Home',      icon: Home,       path: '/dashboard',  state: { tab: 'home' } },
+    { id: 'vault',     label: 'Vault',     icon: Shield,     path: '/dashboard',  state: { tab: 'vault' } },
+    { id: 'portfolio', label: 'Portfolio', icon: LayoutGrid, path: '/portfolio',  state: null },
+    { id: 'activity',  label: 'Activity',  icon: Clock,      path: '/activity',   state: null },
+    { id: 'profile',   label: 'Profile',   icon: User,       path: '/dashboard',  state: { tab: 'profile' } },
+  ] as const;
 
-  const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
+  const path = location.pathname;
+  // What tab is currently active inside the dashboard (if we're there)
+  const dashboardTab = (location.state as any)?.tab as string | undefined;
+
+  const getActive = (id: string) => {
+    if (id === 'activity')  return path === '/activity';
+    if (id === 'portfolio') return path.startsWith('/portfolio');
+    if (path !== '/dashboard' && !path.startsWith('/dashboard/')) return false;
+    // On dashboard — highlight whichever tab matches the state, defaulting 'home'
+    const activeTab = dashboardTab || 'home';
+    return id === activeTab;
+  };
 
   return (
     <div
@@ -34,16 +48,13 @@ export default function BottomNav() {
       }}
     >
       {tabs.map((tab) => {
-        const active = isActive(tab.path) && !(tab.path === '/dashboard' && location.pathname.includes('profile'));
-        const profileActive = tab.id === 'profile' && location.pathname.startsWith('/profile');
-        const finalActive = profileActive || (tab.id !== 'profile' && active);
-
+        const finalActive = getActive(tab.id);
         return (
           <motion.button
             key={tab.id}
             whileHover={{ scale: 1.08, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => navigate(tab.path)}
+            onClick={() => navigate(tab.path, tab.state ? { state: tab.state } : {})}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -52,7 +63,7 @@ export default function BottomNav() {
               padding: '6px 12px',
               borderRadius: 12,
               background: 'none',
-              border: finalActive ? '0 0 2px 0' : 'none',
+              border: 'none',
               borderBottom: finalActive ? '2px solid rgb(168,85,247)' : '2px solid transparent',
               color: finalActive ? '#c084fc' : '#94a3b8',
               cursor: 'pointer',

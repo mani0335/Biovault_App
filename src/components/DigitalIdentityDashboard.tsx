@@ -231,6 +231,91 @@ const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ chi
   </div>
 );
 
+// ─── ProfileField — module-level to prevent focus-loss on re-render ───────────
+// IMPORTANT: Never define components inside another component's render — it
+// causes React to treat them as a new type on every render, unmounting the DOM
+// node and losing keyboard focus after each keystroke.
+type ProfileFieldKey = keyof ProfileData;
+
+const ProfileField: React.FC<{
+  label: string; value: string; field: ProfileFieldKey;
+  icon: React.ElementType; editing: boolean;
+  readOnly?: boolean; multiline?: boolean;
+  onChange: (field: ProfileFieldKey, value: string) => void;
+}> = ({ label, value, field, icon: Icon, editing, readOnly = false, multiline = false, onChange }) => (
+  <div className="space-y-1">
+    <label className="text-xs text-slate-500 flex items-center gap-1.5">
+      <Icon className="w-3 h-3" /> {label}
+    </label>
+    {multiline ? (
+      <textarea
+        value={value}
+        readOnly={!editing || readOnly}
+        onChange={e => onChange(field, e.target.value)}
+        rows={3}
+        className={`w-full bg-slate-900/50 border rounded-xl px-3 py-2 text-sm text-white resize-none transition-colors ${
+          editing && !readOnly ? 'border-cyan-500/50 outline-none' : 'border-slate-700/50 text-slate-300'
+        } ${readOnly ? 'opacity-60' : ''}`}
+      />
+    ) : (
+      <input
+        type="text"
+        value={value}
+        readOnly={!editing || readOnly}
+        onChange={e => onChange(field, e.target.value)}
+        className={`w-full bg-slate-900/50 border rounded-xl px-3 py-2 text-sm text-white transition-colors ${
+          editing && !readOnly ? 'border-cyan-500/50 outline-none' : 'border-slate-700/50 text-slate-300'
+        } ${readOnly ? 'opacity-60' : ''}`}
+      />
+    )}
+  </div>
+);
+
+// ─── SecurityToggle — module-level to prevent re-mount ───────────────────────
+const SecurityToggle: React.FC<{ on: boolean; toggle: () => void }> = ({ on, toggle }) => (
+  <button onClick={toggle} className={`relative w-11 h-6 rounded-full transition-colors ${on ? 'bg-cyan-500' : 'bg-slate-600'}`}>
+    <motion.div layout className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow ${on ? 'left-5' : 'left-0.5'} transition-all`} />
+  </button>
+);
+
+// ─── SecurityAccordion — module-level to prevent re-mount ────────────────────
+const SecurityAccordion: React.FC<{
+  id: string; icon: React.ElementType; title: string; sub: string;
+  children: React.ReactNode; danger?: boolean;
+  openSection: string | null; setOpenSection: (id: string | null) => void;
+}> = ({ id, icon: Icon, title, sub, children, danger = false, openSection, setOpenSection }) => {
+  const open = openSection === id;
+  return (
+    <div className={`rounded-2xl overflow-hidden border ${danger ? 'border-red-500/30' : 'border-slate-700/40'}`}>
+      <button
+        onClick={() => setOpenSection(open ? null : id)}
+        className={`w-full flex items-center gap-3 p-4 text-left transition-colors ${
+          danger ? 'bg-red-900/20 hover:bg-red-900/30' : 'bg-slate-800/40 hover:bg-slate-800/70'
+        }`}
+      >
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${danger ? 'bg-red-500/20' : 'bg-slate-700/60'}`}>
+          <Icon className={`w-4 h-4 ${danger ? 'text-red-400' : 'text-slate-300'}`} />
+        </div>
+        <div className="flex-1">
+          <p className={`text-sm font-semibold ${danger ? 'text-red-400' : 'text-white'}`}>{title}</p>
+          <p className="text-xs text-slate-500">{sub}</p>
+        </div>
+        <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.18 }}>
+          <ChevronDown className="w-4 h-4 text-slate-500" />
+        </motion.div>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
+            className="overflow-hidden">
+            <div className={`p-4 pt-0 ${danger ? 'bg-red-900/10' : 'bg-slate-900/30'}`}>{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // ─── Document Item (subsection card) ─────────────────────────────────────────
 
 interface DocItemProps {
@@ -623,37 +708,10 @@ const ProfileTab: React.FC<{
     setTimeout(() => setSaved(false), 2500);
   };
 
-  type FieldKey = keyof ProfileData;
-  const Field = ({
-    label, value, field, icon: Icon, readOnly = false, multiline = false,
-  }: { label: string; value: string; field: FieldKey; icon: React.ElementType; readOnly?: boolean; multiline?: boolean }) => (
-    <div className="space-y-1">
-      <label className="text-xs text-slate-500 flex items-center gap-1.5">
-        <Icon className="w-3 h-3" /> {label}
-      </label>
-      {multiline ? (
-        <textarea
-          value={value}
-          readOnly={!editing || readOnly}
-          onChange={e => setProfile(p => ({ ...p, [field]: e.target.value }))}
-          rows={3}
-          className={`w-full bg-slate-900/50 border rounded-xl px-3 py-2 text-sm text-white resize-none transition-colors ${
-            editing && !readOnly ? 'border-cyan-500/50 outline-none' : 'border-slate-700/50 text-slate-300'
-          } ${readOnly ? 'opacity-60' : ''}`}
-        />
-      ) : (
-        <input
-          type="text"
-          value={value}
-          readOnly={!editing || readOnly}
-          onChange={e => setProfile(p => ({ ...p, [field]: e.target.value }))}
-          className={`w-full bg-slate-900/50 border rounded-xl px-3 py-2 text-sm text-white transition-colors ${
-            editing && !readOnly ? 'border-cyan-500/50 outline-none' : 'border-slate-700/50 text-slate-300'
-          } ${readOnly ? 'opacity-60' : ''}`}
-        />
-      )}
-    </div>
-  );
+  // ProfileField is defined at module level — using it here by reference
+  // avoids the focus-loss bug caused by inline component definitions.
+  const handleFieldChange = (field: ProfileFieldKey, value: string) =>
+    setProfile(p => ({ ...p, [field]: value }));
 
   return (
     <div className="space-y-4">
@@ -716,22 +774,22 @@ const ProfileTab: React.FC<{
 
       <Card className="space-y-3">
         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Info</p>
-        <Field label="Display Name" value={profile.displayName} field="displayName" icon={User} />
-        <Field label="PINIT ID (Read Only)" value={profile.pinitId} field="pinitId" icon={Key} readOnly />
+        <ProfileField label="Display Name" value={profile.displayName} field="displayName" icon={User} editing={editing} onChange={handleFieldChange} />
+        <ProfileField label="PINIT ID (Read Only)" value={profile.pinitId} field="pinitId" icon={Key} readOnly editing={editing} onChange={handleFieldChange} />
       </Card>
 
       <Card className="space-y-3">
         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Personal Info</p>
-        <Field label="Full Name" value={profile.name} field="name" icon={User} />
-        <Field label="Email" value={profile.email} field="email" icon={Mail} />
-        <Field label="Phone" value={profile.phone} field="phone" icon={Phone} />
-        <Field label="Address" value={profile.address} field="address" icon={MapPin} />
+        <ProfileField label="Full Name" value={profile.name} field="name" icon={User} editing={editing} onChange={handleFieldChange} />
+        <ProfileField label="Email" value={profile.email} field="email" icon={Mail} editing={editing} onChange={handleFieldChange} />
+        <ProfileField label="Phone" value={profile.phone} field="phone" icon={Phone} editing={editing} onChange={handleFieldChange} />
+        <ProfileField label="Address" value={profile.address} field="address" icon={MapPin} editing={editing} onChange={handleFieldChange} />
       </Card>
 
       <Card className="space-y-3">
         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">About & Social</p>
-        <Field label="Bio" value={profile.bio} field="bio" icon={FileText} multiline />
-        <Field label="GitHub Username" value={profile.github} field="github" icon={Github} />
+        <ProfileField label="Bio" value={profile.bio} field="bio" icon={FileText} multiline editing={editing} onChange={handleFieldChange} />
+        <ProfileField label="GitHub Username" value={profile.github} field="github" icon={Github} editing={editing} onChange={handleFieldChange} />
       </Card>
     </div>
   );
@@ -746,47 +804,7 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
 
-  const Toggle = ({ on, toggle }: { on: boolean; toggle: () => void }) => (
-    <button onClick={toggle} className={`relative w-11 h-6 rounded-full transition-colors ${on ? 'bg-cyan-500' : 'bg-slate-600'}`}>
-      <motion.div layout className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow ${on ? 'left-5' : 'left-0.5'} transition-all`} />
-    </button>
-  );
-
-  const Accordion = ({ id, icon: Icon, title, sub, children, danger = false }: {
-    id: string; icon: React.ElementType; title: string; sub: string;
-    children: React.ReactNode; danger?: boolean;
-  }) => {
-    const open = openSection === id;
-    return (
-      <div className={`rounded-2xl overflow-hidden border ${danger ? 'border-red-500/30' : 'border-slate-700/40'}`}>
-        <button
-          onClick={() => setOpenSection(open ? null : id)}
-          className={`w-full flex items-center gap-3 p-4 text-left transition-colors ${
-            danger ? 'bg-red-900/20 hover:bg-red-900/30' : 'bg-slate-800/40 hover:bg-slate-800/70'
-          }`}
-        >
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${danger ? 'bg-red-500/20' : 'bg-slate-700/60'}`}>
-            <Icon className={`w-4 h-4 ${danger ? 'text-red-400' : 'text-slate-300'}`} />
-          </div>
-          <div className="flex-1">
-            <p className={`text-sm font-semibold ${danger ? 'text-red-400' : 'text-white'}`}>{title}</p>
-            <p className="text-xs text-slate-500">{sub}</p>
-          </div>
-          <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.18 }}>
-            <ChevronDown className="w-4 h-4 text-slate-500" />
-          </motion.div>
-        </button>
-        <AnimatePresence>
-          {open && (
-            <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-              className="overflow-hidden">
-              <div className={`p-4 pt-0 ${danger ? 'bg-red-900/10' : 'bg-slate-900/30'}`}>{children}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    );
-  };
+  // Toggle and Accordion are defined at module level as SecurityToggle / SecurityAccordion
 
   const DEVICES = [
     { name: 'Android Phone', model: 'Current Device', last: 'Now', active: true },
@@ -817,13 +835,13 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
                 <p className="text-sm text-white font-medium">{item.label}</p>
                 <p className="text-xs text-slate-500">{item.desc}</p>
               </div>
-              <Toggle on={item.val} toggle={() => item.set(!item.val)} />
+              <SecurityToggle on={item.val} toggle={() => item.set(!item.val)} />
             </div>
           </React.Fragment>
         ))}
       </Card>
 
-      <Accordion id="devices" icon={Monitor} title="Device Management" sub={`${DEVICES.length} connected`}>
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="devices" icon={Monitor} title="Device Management" sub={`${DEVICES.length} connected`}>
         <div className="space-y-2 pt-3">
           {DEVICES.map(d => (
             <div key={d.name} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl">
@@ -837,9 +855,9 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             </div>
           ))}
         </div>
-      </Accordion>
+      </SecurityAccordion>
 
-      <Accordion id="login" icon={Clock} title="Login Activity" sub="Recent sign-in history">
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="login" icon={Clock} title="Login Activity" sub="Recent sign-in history">
         <div className="space-y-2 pt-3">
           {LOGINS.map((a, i) => (
             <div key={i} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl">
@@ -852,9 +870,9 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             </div>
           ))}
         </div>
-      </Accordion>
+      </SecurityAccordion>
 
-      <Accordion id="sessions" icon={Globe} title="Session Management" sub="Manage active sessions">
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="sessions" icon={Globe} title="Session Management" sub="Manage active sessions">
         <div className="pt-3 space-y-2">
           <div className="p-3 bg-slate-800/60 rounded-xl flex items-center justify-between">
             <div><p className="text-sm text-white">Current Session</p><p className="text-xs text-slate-500">Started now · Android</p></div>
@@ -864,9 +882,9 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             <LogOut className="w-4 h-4" /> End All Other Sessions
           </button>
         </div>
-      </Accordion>
+      </SecurityAccordion>
 
-      <Accordion id="recovery" icon={RefreshCw} title="Recovery & Backup" sub="Backup and recovery options">
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="recovery" icon={RefreshCw} title="Recovery & Backup" sub="Backup and recovery options">
         <div className="pt-3 space-y-2">
           {[
             { icon: Download, label: 'Export Vault Backup' },
@@ -878,9 +896,9 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             </button>
           ))}
         </div>
-      </Accordion>
+      </SecurityAccordion>
 
-      <Accordion id="temp" icon={Clock} title="Temporary Access" sub="Grant time-limited vault access">
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="temp" icon={Clock} title="Temporary Access" sub="Grant time-limited vault access">
         <div className="pt-3 space-y-2">
           <p className="text-xs text-slate-500">Create a link that expires automatically.</p>
           <div className="flex gap-2">
@@ -890,9 +908,9 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             <button className="px-4 py-2 bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-sm rounded-xl">Generate</button>
           </div>
         </div>
-      </Accordion>
+      </SecurityAccordion>
 
-      <Accordion id="logout" icon={LogOut} title="Sign Out Everywhere" sub="Revoke all active sessions" danger>
+      <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="logout" icon={LogOut} title="Sign Out Everywhere" sub="Revoke all active sessions" danger>
         <div className="pt-3">
           {confirmLogout ? (
             <div className="space-y-2">
@@ -908,7 +926,7 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             </button>
           )}
         </div>
-      </Accordion>
+      </SecurityAccordion>
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Download, Lock, AlertCircle, Loader, Shield, Image, Calendar, Eye, FileText } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { SecurePdfViewer } from './SecurePdfViewer';
 
 interface ShareConfig {
   share_id: string;
@@ -175,17 +176,6 @@ export const SharedImageViewer: React.FC = () => {
     }
   };
 
-  const openPdf = () => {
-    if (!shareData?.vault_image_id) return;
-    // Convert data URL to a Blob URL so the browser opens it natively
-    const byteStr = atob(shareData.vault_image_id.split(',')[1]);
-    const arr = new Uint8Array(byteStr.length);
-    for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
-    const blob = new Blob([arr], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-  };
-
   // ─── LOADING ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -289,9 +279,15 @@ export const SharedImageViewer: React.FC = () => {
 
   // ─── Content type detection ────────────────────────────────────────────────
   const contentUrl = shareData.vault_image_id || null;
-  const isPdfContent = !!contentUrl && contentUrl.startsWith('data:application/pdf');
-  const isImageContent = !!contentUrl && contentUrl.startsWith('data:image') && !imgError;
+  const fileNameLower = (shareData.image_name || '').toLowerCase();
+  const isPdfByName = fileNameLower.endsWith('.pdf');
+  const isPdfContent = !!contentUrl && (
+    contentUrl.startsWith('data:application/pdf') ||
+    (isPdfByName && contentUrl.startsWith('data:'))
+  );
+  const isImageContent = !!contentUrl && contentUrl.startsWith('data:image') && !imgError && !isPdfByName;
   const hasContent = isPdfContent || isImageContent;
+  const isPdfNoData = isPdfByName && !contentUrl;
   const downloadsRemaining = shareData.download_limit
     ? Math.max(0, shareData.download_limit - (shareData.downloads_used || 0))
     : null;
@@ -314,8 +310,39 @@ export const SharedImageViewer: React.FC = () => {
           <p className="text-slate-400 text-sm">Secure document shared with you</p>
         </div>
 
-        {/* ── PDF PREVIEW ───────────────────────────────────────────────── */}
+        {/* ── PDF PREVIEW — inline SecurePdfViewer, never opens externally ── */}
         {isPdfContent && (
+          <motion.div
+            initial={{ y: 16, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden mb-4"
+          >
+            <div className="bg-green-900/30 border-b border-green-700/40 px-4 py-3 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <span className="text-green-300 text-sm font-medium">✅ Verified PINIT Share</span>
+            </div>
+            <div style={{ width: '100%', minHeight: '60vh' }} onClick={e => e.stopPropagation()}>
+              <SecurePdfViewer
+                pdfData={contentUrl!}
+                fileName={shareData.image_name || 'document.pdf'}
+                downloadEnabled={!shareData.download_limit || (shareData.downloads_used || 0) < shareData.download_limit}
+              />
+            </div>
+            <div className="px-4 py-3 flex items-center justify-between border-t border-slate-700">
+              <div className="flex items-center gap-2 text-slate-400 text-xs">
+                <FileText className="w-4 h-4" />
+                <span className="truncate max-w-[160px]">{shareData.image_name || 'PDF Document'}</span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-500 text-xs">
+                <Eye className="w-3.5 h-3.5" />
+                <span>{shareData.access_count || 1} view{(shareData.access_count || 1) !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── PDF NAME-ONLY (no data) PLACEHOLDER ───────────────────────── */}
+        {isPdfNoData && (
           <motion.div
             initial={{ y: 16, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -330,25 +357,8 @@ export const SharedImageViewer: React.FC = () => {
                 <FileText className="w-10 h-10 text-red-400" />
               </div>
               <div className="text-center">
-                <p className="text-white font-semibold text-base">{shareData.image_name || 'PDF Document'}</p>
-                <p className="text-slate-400 text-sm mt-1">PDF Document</p>
-              </div>
-              <button
-                onClick={openPdf}
-                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all flex items-center gap-2"
-              >
-                <FileText className="w-4 h-4" />
-                Open PDF
-              </button>
-            </div>
-            <div className="px-4 py-3 flex items-center justify-between border-t border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-xs">
-                <FileText className="w-4 h-4" />
-                <span className="truncate max-w-[160px]">{shareData.image_name || 'PDF Document'}</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-500 text-xs">
-                <Eye className="w-3.5 h-3.5" />
-                <span>{shareData.access_count || 1} view{(shareData.access_count || 1) !== 1 ? 's' : ''}</span>
+                <p className="text-white font-semibold text-base">{shareData.image_name}</p>
+                <p className="text-slate-400 text-sm mt-1">🔒 PDF is secured — contact the owner for access</p>
               </div>
             </div>
           </motion.div>
@@ -387,7 +397,7 @@ export const SharedImageViewer: React.FC = () => {
         )}
 
         {/* ── NO PREVIEW FALLBACK ───────────────────────────────────────── */}
-        {!hasContent && (
+        {!hasContent && !isPdfNoData && (
           <motion.div
             initial={{ y: 16, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}

@@ -32,6 +32,7 @@ const PortfolioEdit        = lazy(() => import("@/pages/portfolio/PortfolioEdit"
 const PortfolioShare       = lazy(() => import("@/pages/portfolio/PortfolioShare"));
 const ChoosePortfolioType  = lazy(() => import("@/pages/portfolio/ChoosePortfolioType"));
 const SharedPortfolioPage  = lazy(() => import("@/pages/portfolio/SharedPortfolioPage"));
+const ActivityPage         = lazy(() => import("@/pages/ActivityPage"));
 
 // Profile sub-pages
 const PersonalPage        = lazy(() => import("@/pages/profile/PersonalPage"));
@@ -180,6 +181,9 @@ const App = () => (
           } />
           <Route path="/review" element={
             <ProtectedRoute><ReviewPage /></ProtectedRoute>
+          } />
+          <Route path="/activity" element={
+            <ProtectedRoute><ActivityPage /></ProtectedRoute>
           } />
 
           {/* Portfolio */}
