@@ -10,10 +10,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-// Vite resolves this at build time and emits the worker file into the assets directory.
-// The ?url suffix returns a string URL that pdf.js can use as its worker source.
-// @ts-expect-error — pdfjs-dist worker URL import (Vite-specific)
-import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader, AlertCircle } from "lucide-react";
 
 interface SecurePdfViewerProps {
@@ -74,13 +70,10 @@ export function SecurePdfViewer({
         // Dynamically import pdfjs-dist so it only loads when needed
         const pdfjs = await import("pdfjs-dist");
 
-        // Point the worker to the bundled worker file
-        // Vite copies the file into /assets automatically via the ?url import
-        const workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url
-        ).href;
-        pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+        // Use the CDN worker so Rollup never needs to resolve the worker file
+        // at build time. This is the most reliable approach across all bundlers.
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
         // Build a Uint8Array from base64
         const raw = pdfData.startsWith("data:")
