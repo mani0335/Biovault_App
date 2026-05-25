@@ -2922,14 +2922,17 @@ function SharePage({
             }
           }
           if (rawData) {
-            if (rawData.startsWith('data:image')) {
-              // Already a complete, displayable data URL
+            if (rawData.startsWith('data:application/pdf')) {
               previewDataUrl = rawData;
-            } else if (rawData.length > 5000) {
-              // Raw base64 — wrap it (skip PDFs)
+            } else if (rawData.startsWith('data:image')) {
+              previewDataUrl = rawData;
+            } else if (rawData.length > 100) {
+              // Raw base64 — detect type from magic bytes
               try {
                 const sample = atob(rawData.substring(0, 8));
-                if (!sample.startsWith('%PDF')) {
+                if (sample.startsWith('%PDF')) {
+                  previewDataUrl = `data:application/pdf;base64,${rawData}`;
+                } else {
                   previewDataUrl = `data:image/jpeg;base64,${rawData}`;
                 }
               } catch { /* not valid base64 */ }
@@ -2964,14 +2967,16 @@ function SharePage({
             }
 
             if (base64 && base64.length > 100) {
-              if (base64.startsWith('data:image')) {
+              if (base64.startsWith('data:application/pdf')) {
+                previewDataUrl = base64;
+              } else if (base64.startsWith('data:image')) {
                 previewDataUrl = base64;
               } else {
                 try {
                   const sample = atob(base64.substring(0, 8));
-                  if (!sample.startsWith('%PDF')) {
-                    previewDataUrl = `data:image/jpeg;base64,${base64}`;
-                  }
+                  previewDataUrl = sample.startsWith('%PDF')
+                    ? `data:application/pdf;base64,${base64}`
+                    : `data:image/jpeg;base64,${base64}`;
                 } catch {
                   previewDataUrl = `data:image/jpeg;base64,${base64}`;
                 }

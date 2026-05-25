@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Download, Lock, AlertCircle, Loader, Shield, Image, Calendar, Eye, FileText } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { SecurePdfViewer } from './SecurePdfViewer';
+import { logActivityEvent } from '@/lib/activityService';
 
 interface ShareConfig {
   share_id: string;
@@ -38,6 +39,44 @@ export const SharedImageViewer: React.FC = () => {
     document.body.style.background = 'linear-gradient(to bottom, #0f172a, #1e293b)';
     return () => { document.body.style.background = ''; };
   }, []);
+
+  // Screenshot / screen-capture detection
+  useEffect(() => {
+    if (!shareData) return;
+    const logScreenshot = () => {
+      logActivityEvent({
+        userId: shareData.user_id,
+        type: 'screenshot_attempted',
+        title: 'Screenshot Detected',
+        description: `Screenshot or screen-capture was detected while viewing "${shareData.image_name || 'document'}"`,
+        metadata: { share_id: token },
+      });
+    };
+    // Detect Print Screen key
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'PrintScreen' || (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5'))) {
+        logScreenshot();
+      }
+    };
+    // Detect page becoming hidden (alt-tab / screen record / task switch)
+    const onVisibility = () => {
+      if (document.hidden) {
+        logActivityEvent({
+          userId: shareData.user_id,
+          type: 'tab_switch',
+          title: 'Viewer Left Share Page',
+          description: `User switched away while viewing "${shareData.image_name || 'document'}"`,
+          metadata: { share_id: token },
+        });
+      }
+    };
+    window.addEventListener('keyup', onKey);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('keyup', onKey);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [shareData, token]);
 
   useEffect(() => {
     if (!token) {
@@ -97,6 +136,15 @@ export const SharedImageViewer: React.FC = () => {
           .update({ access_count: (row.access_count || 0) + 1 })
           .eq('share_id', token)
           .then(() => {});
+
+        // Log view activity for the document owner
+        logActivityEvent({
+          userId: row.user_id,
+          type: 'link_accessed',
+          title: 'Shared Document Viewed',
+          description: `"${row.image_name || 'document'}" was viewed via share link`,
+          metadata: { share_id: token, share_link: row.share_link },
+        });
 
         setShareData(row);
       } catch (err) {
@@ -163,6 +211,15 @@ export const SharedImageViewer: React.FC = () => {
         .update({ downloads_used: newUsed })
         .eq('share_id', token || '')
         .then(() => {});
+
+      // Log download activity for the document owner
+      logActivityEvent({
+        userId: shareData.user_id,
+        type: 'downloaded',
+        title: 'Shared Document Downloaded',
+        description: `"${filename}" was downloaded (${newUsed}/${shareData.download_limit ?? '∞'} downloads used)`,
+        metadata: { share_id: token, filename, downloads_used: newUsed },
+      });
 
       setShareData(prev => prev ? { ...prev, downloads_used: newUsed } : prev);
 
