@@ -94,6 +94,7 @@ import DigitalIdentityDashboard from "@/components/DigitalIdentityDashboard";
 import { ImageAnalyzer } from "@/components/ImageAnalyzer";
 import type { Portfolio } from "@/types/Portfolio";
 import PortfolioHome from "@/pages/portfolio/PortfolioHome";
+import { SecurePdfViewer } from "@/components/SecurePdfViewer";
 
 interface VaultDocument {
   id: string;
@@ -1790,24 +1791,14 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
                 />
               </div>
             ) : (
-              /* ── PDF / document — iframe first, "Open" fallback ── */
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                {/* iframe handles PDFs natively in Chrome WebView */}
-                <iframe
-                  src={fullscreenPreview.dataUrl}
-                  title={fullscreenPreview.name}
-                  style={{ flex: 1, border: 'none', width: '100%', minHeight: '70vh' }}
+              /* ── PDF — inline SecurePdfViewer, never open externally ── */
+              <div style={{ width: '100%', height: '100%', minHeight: '70vh' }} onClick={e => e.stopPropagation()}>
+                <SecurePdfViewer
+                  pdfData={fullscreenPreview.dataUrl}
+                  fileName={fullscreenPreview.name}
+                  downloadEnabled={true}
+                  onClose={() => setFullscreenPreview(null)}
                 />
-                {/* Always show "Open with app" as secondary action for Android */}
-                <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: 10, alignItems: 'center', background: 'rgba(0,0,0,0.6)' }}>
-                  <span style={{ color: '#94a3b8', fontSize: 12, flex: 1 }}>If the PDF doesn't display, tap Open to use a PDF viewer app.</span>
-                  <button
-                    onClick={() => openPdfPreview(fullscreenPreview.dataUrl, fullscreenPreview.name)}
-                    style={{ background: 'linear-gradient(135deg,#06b6d4,#8b5cf6)', color: 'white', border: 'none', borderRadius: 12, padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
-                  >
-                    📂 Open
-                  </button>
-                </div>
               </div>
             )}
           </div>
@@ -1843,26 +1834,13 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
           {previewImage.startsWith('data:application/pdf') ||
            previewImage.startsWith('blob:') ||
            (selectedDoc.metadata?.original_name || getSafeName(selectedDoc)).toLowerCase().endsWith('.pdf') ? (
-            <div style={{ textAlign: 'center', color: 'white', maxWidth: 320, padding: 24 }}>
-              <div style={{ fontSize: 80, marginBottom: 20, lineHeight: 1 }}>📄</div>
-              <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 10, wordBreak: 'break-all' }}>
-                {selectedDoc.metadata?.original_name || getSafeName(selectedDoc)}
-              </p>
-              <p style={{ color: 'rgba(148,163,184,1)', fontSize: 14, marginBottom: 28, lineHeight: 1.5 }}>
-                PDF documents cannot be displayed inline.{'\n'}
-                Tap below to open with your PDF viewer app.
-              </p>
-              <button
-                onClick={() => openPdfPreview(previewImage, selectedDoc.metadata?.original_name || getSafeName(selectedDoc))}
-                style={{
-                  background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)',
-                  color: 'white', border: 'none', borderRadius: 14,
-                  padding: '14px 32px', fontSize: 15, fontWeight: 700,
-                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
-                }}
-              >
-                📂 Open PDF
-              </button>
+            <div style={{ width: '100%', minHeight: '70vh' }} onClick={e => e.stopPropagation()}>
+              <SecurePdfViewer
+                pdfData={previewImage}
+                fileName={selectedDoc.metadata?.original_name || getSafeName(selectedDoc)}
+                downloadEnabled={true}
+                onClose={() => { setSelectedDoc(null); setPreviewImage(null); }}
+              />
             </div>
           ) : (
             <img
