@@ -743,6 +743,31 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
     initializeVault();
   }, [userId]);
 
+  // Load share configs from Supabase so DNA Monitoring always has data
+  useEffect(() => {
+    if (!userId) return;
+    const loadShares = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('share_configs')
+          .select('share_id, share_link, created_at, expiry_date, image_name')
+          .eq('user_id', userId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        if (error || !data) return;
+        const configs = data.map((row: any) => ({
+          id: row.share_id as string,
+          shareLink: (row.share_link as string) || '',
+          createdAt: (row.created_at as string) || new Date().toISOString(),
+          expiryDate: (row.expiry_date as string) || null,
+          image_name: (row.image_name as string) || undefined,
+        }));
+        setShareConfigs(configs);
+      } catch { /* ignore */ }
+    };
+    loadShares();
+  }, [userId]);
+
   // Verify authentication and load user data on mount
   useEffect(() => {
     const verifyAuth = async () => {
