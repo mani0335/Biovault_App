@@ -555,3 +555,20 @@ export function subscribeToShareActivity(shareId: string, onUpdate: () => void):
     return () => { /* no-op */ };
   }
 }
+
+// ─── Check if monitoring tables exist ────────────────────────────────────────
+
+export async function checkMonitoringTablesExist(): Promise<boolean> {
+  try {
+    const { error } = await (supabase as any)
+      .from('share_visitors')
+      .select('share_id')
+      .limit(1);
+    if (error && (error.code === '42P01' || String(error.message).includes('does not exist'))) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
