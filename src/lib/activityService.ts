@@ -35,7 +35,9 @@ export type ActivityEventType =
   | 'rapid_scroll'
   | 'session_start'
   | 'session_end'
-  | 're_accessed';
+  | 're_accessed'
+  | 'download_requested'
+  | 'link_forwarded';
 
 export type ActivityStatus = 'success' | 'blocked' | 'denied' | 'pending' | 'warning';
 

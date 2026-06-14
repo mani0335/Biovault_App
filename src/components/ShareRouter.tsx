@@ -1,20 +1,18 @@
 /**
  * ShareRouter.tsx
  * ───────────────
- * Routes /share/:token to the correct viewer based on the token prefix.
+ * Routes /share/:token to the correct viewer.
  *
- *   portfolio_{timestamp}_{rand6}  → SharedPortfolioPage (Supabase-backed)
- *   share_{timestamp}_{rand6}      → SharedImageViewer   (Vault document)
- *
- * Both child components read `useParams().token` from the parent Route,
- * so no prop drilling is needed — they work unchanged.
+ *   portfolio_{...}  → SharedPortfolioPage (Supabase-backed portfolio)
+ *   share_{...}      → SecureShareGate     (PINIT DNA — identity + location gate)
+ *   (any other)      → SecureShareGate     (fallback)
  */
 
 import { useParams } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 
-const SharedImageViewer  = lazy(() =>
-  import('@/components/SharedImageViewer').then(m => ({ default: m.SharedImageViewer })),
+const SecureShareGate = lazy(() =>
+  import('@/components/SecureShareGate').then((m) => ({ default: m.SecureShareGate })),
 );
 const SharedPortfolioPage = lazy(() =>
   import('@/pages/portfolio/SharedPortfolioPage'),
@@ -22,25 +20,20 @@ const SharedPortfolioPage = lazy(() =>
 
 const PageLoader = () => (
   <div style={{
-    width: '100vw',
-    height: '100vh',
-    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'column',
-    gap: '16px',
+    width: '100vw', height: '100vh',
+    background: 'radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.12) 0%, #050a14 60%)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'column', gap: '16px',
   }}>
     <div style={{
-      width: '44px',
-      height: '44px',
-      border: '3px solid rgba(139,92,246,0.2)',
-      borderTop: '3px solid #8b5cf6',
+      width: '44px', height: '44px',
+      border: '3px solid rgba(139,92,246,0.15)',
+      borderTop: '3px solid #a855f7',
       borderRadius: '50%',
       animation: 'spin 0.9s linear infinite',
     }} />
-    <p style={{ color: '#9ca3af', fontSize: '14px', fontFamily: 'monospace' }}>
-      Loading shared content…
+    <p style={{ color: '#6b21a8', fontSize: '12px', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
+      PINIT DNA
     </p>
     <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
   </div>
@@ -59,7 +52,7 @@ export default function ShareRouter() {
 
   return (
     <Suspense fallback={<PageLoader />}>
-      <SharedImageViewer />
+      <SecureShareGate />
     </Suspense>
   );
 }
