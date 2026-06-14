@@ -902,6 +902,19 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
     });
   }, [shares, tick]);
 
+  // Reload a single share's data
+  const reloadShare = useCallback(async (shareId: string) => {
+    const raw = await getShareMonitorData(shareId);
+    setAllData((prev) => ({
+      ...prev,
+      [shareId]: {
+        visitors: (raw.visitors as unknown as Visitor[]) || [],
+        secEvents: (raw.securityEvents as unknown as SecEvent[]) || [],
+        dlRequests: (raw.downloadRequests as unknown as DlRequest[]) || [],
+      },
+    }));
+  }, []);
+
   // Aggregate stats
   const totalViewers = Object.values(allData).reduce((s, d) => s + d.visitors.length, 0);
   const activeViewers = Object.values(allData).reduce((s, d) => s + d.visitors.filter((v) => isActive(v.last_active)).length, 0);
@@ -910,6 +923,19 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
   const dlPending = Object.values(allData).reduce((s, d) => s + d.dlRequests.filter((r) => !r.status || r.status === 'pending').length, 0);
   const totalScreenshots = Object.values(allData).reduce((s, d) =>
     s + d.secEvents.filter((e) => e.event_type.includes('screenshot') || e.event_type.includes('screen_recording')).length, 0);
+
+  // All download requests across all shares (pending first, then rest)
+  const allDlRequests = Object.entries(allData).flatMap(([shareId, d]) => {
+    const share = shares.find((s) => s.id === shareId);
+    const fileName = share?.image_name || share?.shareLink.split('/').pop() || shareId.slice(-8);
+    return d.dlRequests.map((r) => ({ ...r, shareId, fileName }));
+  }).sort((a, b) => {
+    const aPending = !a.status || a.status === 'pending';
+    const bPending = !b.status || b.status === 'pending';
+    if (aPending && !bPending) return -1;
+    if (!aPending && bPending) return 1;
+    return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+  });
 
   // Country breakdown
   const countryMap: Record<string, number> = {};
@@ -1002,6 +1028,92 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
             </motion.div>
           ))}
         </div>
+
+        {/* ── Download Requests Inbox ── */}
+        {allDlRequests.length > 0 && (
+          <div className={`rounded-2xl border overflow-hidden ${dlPending > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-slate-700/40 bg-slate-900/40'}`}>
+            {/* Inbox header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700/30">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${dlPending > 0 ? 'bg-amber-500/20' : 'bg-slate-700/40'}`}>
+                <Download className={`w-4 h-4 ${dlPending > 0 ? 'text-amber-400' : 'text-slate-400'}`} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-white">Download Requests</p>
+                <p className="text-[9px] text-slate-500">Viewers requesting file access</p>
+              </div>
+              {dlPending > 0 && (
+                <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/40 rounded-full px-2.5 py-1 animate-pulse">
+                  {dlPending} pending
+                </span>
+              )}
+            </div>
+
+            {/* Request cards */}
+            <div className="p-3 space-y-2">
+              {allDlRequests.map((req, i) => {
+                const isPending = !req.status || req.status === 'pending';
+                return (
+                  <motion.div
+                    key={req.id || i}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    className={`rounded-xl border px-3 py-3 space-y-2.5 ${
+                      isPending
+                        ? 'border-amber-500/25 bg-amber-500/5'
+                        : req.status === 'approved'
+                        ? 'border-emerald-500/20 bg-emerald-500/5 opacity-70'
+                        : 'border-red-500/20 bg-red-500/5 opacity-60'
+                    }`}
+                  >
+                    {/* Who + what file */}
+                    <div className="flex items-start gap-2.5">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                        isPending ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700/50 text-slate-400'
+                      }`}>
+                        {(req.visitor_name || 'A').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{req.visitor_name || 'Unknown'}</p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          Requesting download of <span className="text-slate-200 font-semibold">{(req as any).fileName}</span>
+                        </p>
+                        <p className="text-[9px] text-slate-600 mt-0.5">{timeAgo(req.created_at)}</p>
+                      </div>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 ${
+                        isPending
+                          ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                          : req.status === 'approved'
+                          ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                          : 'text-red-400 bg-red-500/10 border-red-500/30'
+                      }`}>
+                        {isPending ? 'PENDING' : req.status?.toUpperCase()}
+                      </span>
+                    </div>
+
+                    {/* Approve / Reject — only for pending */}
+                    {isPending && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => approveDownloadRequest(req.id, 1).then(() => reloadShare((req as any).shareId))}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-600/35 active:scale-95 transition-all"
+                        >
+                          <span className="text-base leading-none">✓</span> Approve Download
+                        </button>
+                        <button
+                          onClick={() => rejectDownloadRequest(req.id).then(() => reloadShare((req as any).shareId))}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-600/20 border border-red-500/40 text-red-300 text-xs font-bold hover:bg-red-600/35 active:scale-95 transition-all"
+                        >
+                          <span className="text-base leading-none">✗</span> Reject
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Location intelligence */}
         {countries.length > 0 && (
