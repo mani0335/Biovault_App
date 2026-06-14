@@ -27,6 +27,9 @@ import { embedSimpleWatermark, extractSimpleWatermark, extractFallbackMetadata, 
 import { analyzeImage, formatAnalysisResult, type ImageAnalysisResult } from "@/lib/imageAnalysis";
 import { computePHashFromBase64, findDuplicates, type DuplicateDocument } from "@/lib/phash";
 import { supabase } from "@/integrations/supabase/client";
+import { generateDocumentDNA, diffDocumentDNA, type DocumentDNA, type DnaDifference } from "@/lib/documentDna";
+import { DnaLabPage } from "@/components/DnaLab";
+import { GenerateDNAPage } from "@/components/GenerateDNAPage";
 import {
   User,
   FileText,
@@ -129,6 +132,13 @@ interface ShareConfig {
   qrCodeData: string;
   createdAt: string;
   createdBy: string;
+  enableChainTracking?: boolean;
+  enableWatermark?: boolean;
+  blockVpn?: boolean;
+  requireOtp?: boolean;
+  alertOnOpen?: boolean;
+  alertOnForward?: boolean;
+  disableRightClick?: boolean;
 }
 
 interface PINITDashboardProps {
@@ -136,7 +146,7 @@ interface PINITDashboardProps {
   isRestricted?: boolean;
 }
 
-type PageType = "home" | "vault" | "portfolio" | "share" | "identity" | "encrypt-preview" | "verify-proof" | "crypto" | "vault-advanced" | "activity" | "profile" | "analysis" | "upload-document" | "scan-document" | "review-scan";
+type PageType = "home" | "vault" | "portfolio" | "share" | "identity" | "encrypt-preview" | "verify-proof" | "crypto" | "vault-advanced" | "activity" | "profile" | "analysis" | "upload-document" | "scan-document" | "review-scan" | "dna-lab" | "generate-dna";
 
 // ============= SHARE ACCESS PAGE =============
 function ShareAccessPage() {
@@ -885,7 +895,7 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
 
       {/* Content Area */}
       <AnimatePresence mode="wait">
-        {currentPage === "home" && <HomePage key="home" userName={userName} documentCount={vaultDocuments.length} onEncryptClick={async () => {
+        {currentPage === "home" && <HomePage key="home" userName={userName} documentCount={vaultDocuments.length} activeSharesCount={shareConfigs.length} onEncryptClick={async () => {
           try {
             console.log("Opening camera for encryption...");
             const image = await CameraPlugin.getPhoto({
@@ -949,6 +959,27 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
             setProfileImage={(img: string) => handleSetProfileImage(img)}
             userId={userId}
             onDocumentUploaded={handleDocumentUploaded}
+          />
+        )}
+        {currentPage === "dna-lab" && (
+          <DnaLabPage
+            key="dna-lab"
+            documents={vaultDocuments as any}
+            userId={userId || undefined}
+            onBack={() => setCurrentPage("vault")}
+            shares={shareConfigs as any}
+          />
+        )}
+        {currentPage === "generate-dna" && (
+          <GenerateDNAPage
+            key="generate-dna"
+            documents={vaultDocuments as any}
+            onBack={() => setCurrentPage("home")}
+            onScanClick={() => {
+              setScannedPages([]);
+              setCurrentPage("scan-document");
+            }}
+            onDocumentSaved={handleDocumentUploaded}
           />
         )}
         {currentPage === "upload-document" && (
@@ -1233,7 +1264,7 @@ function NavButton({
 }
 
 // ============= HOME PAGE =============
-function HomePage({ userName, documentCount, onEncryptClick, setVerifyProofImage, setCurrentPage, quickActionCameraRef, quickActionFileRef, onQuickActionImageSelected, onVerifyProofImageSelected, navigate }: { userName: string; documentCount: number; onEncryptClick: () => void; setVerifyProofImage: (value: string | null) => void; setCurrentPage: (page: PageType) => void; quickActionCameraRef?: React.RefObject<HTMLInputElement>; quickActionFileRef?: React.RefObject<HTMLInputElement>; onQuickActionImageSelected?: (imageData: string) => void; onVerifyProofImageSelected?: (imageData: string) => void; navigate: (path: string) => void }) {
+function HomePage({ userName, documentCount, activeSharesCount, onEncryptClick, setVerifyProofImage, setCurrentPage, quickActionCameraRef, quickActionFileRef, onQuickActionImageSelected, onVerifyProofImageSelected, navigate }: { userName: string; documentCount: number; activeSharesCount: number; onEncryptClick: () => void; setVerifyProofImage: (value: string | null) => void; setCurrentPage: (page: PageType) => void; quickActionCameraRef?: React.RefObject<HTMLInputElement>; quickActionFileRef?: React.RefObject<HTMLInputElement>; onQuickActionImageSelected?: (imageData: string) => void; onVerifyProofImageSelected?: (imageData: string) => void; navigate: (path: string) => void }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1261,7 +1292,7 @@ function HomePage({ userName, documentCount, onEncryptClick, setVerifyProofImage
       <div className="grid grid-cols-2 gap-4">
         {[
           { label: "Documents", value: documentCount.toString(), icon: FileText, gradient: "from-blue-600 to-purple-600" },
-          { label: "Active Shares", value: "3", icon: Share2, gradient: "from-purple-600 to-pink-600" },
+          { label: "Active Shares", value: activeSharesCount.toString(), icon: Share2, gradient: "from-purple-600 to-pink-600" },
         ].map((stat, idx) => (
           <motion.div
             key={idx}
@@ -1300,15 +1331,14 @@ function HomePage({ userName, documentCount, onEncryptClick, setVerifyProofImage
               onClick: () => quickActionFileRef?.current?.click(),
               subtext: "📤 Upload" 
             },
-            { 
-              icon: Upload, 
-              label: "Upload", 
-              gradient: "from-orange-600 to-red-600", 
+            {
+              icon: Fingerprint,
+              label: "PINIT DNA",
+              gradient: "from-orange-600 to-red-600",
               onClick: () => {
-                console.log("📄 Navigating to document upload...");
-                setCurrentPage("upload-document");
+                setCurrentPage("generate-dna");
               },
-              subtext: "📄"
+              subtext: "🧬 DNA"
             },
             { 
               icon: Share2, 
@@ -1401,6 +1431,7 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
   const [docToDelete, setDocToDelete] = useState<string | null>(null);
   const [embeddedMetadata, setEmbeddedMetadata] = useState<AdvancedWatermarkMetadata | null>(null);
   const [showDigitalIdentities, setShowDigitalIdentities] = useState(false);
+  const [showVaultDna, setShowVaultDna] = useState(false);
   const [fullscreenPreview, setFullscreenPreview] = useState<{ dataUrl: string; name: string } | null>(null);
 
   // Safe name accessor — handles both vaultService format (name) and vaultManager format (fileName)
@@ -2062,6 +2093,131 @@ function VaultPage({ documents, onDeleteDocument, onStartShare, userId, selected
           className="bg-transparent outline-none flex-1 text-sm placeholder-slate-500"
         />
       </div>
+
+      {/* ── DNA Lab — advanced analysis hub ── */}
+      <motion.button
+        onClick={() => setCurrentPage("dna-lab")}
+        whileHover={{ scale: 1.01 }}
+        whileTap={{ scale: 0.985 }}
+        type="button"
+        className="w-full relative overflow-hidden rounded-2xl p-[1.5px] bg-gradient-to-r from-fuchsia-500 via-purple-500 to-cyan-500 shadow-[0_10px_30px_rgba(124,92,255,.35)]"
+      >
+        <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-purple-950/80 p-4 text-left">
+          <div className="pointer-events-none absolute -top-6 -right-6 w-28 h-28 rounded-full bg-fuchsia-500/20 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-8 -left-8 w-28 h-28 rounded-full bg-cyan-500/15 blur-2xl" />
+          <div className="relative flex items-center gap-3 mb-3">
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-fuchsia-500 to-cyan-500 flex items-center justify-center shadow-lg">
+                <Fingerprint size={22} className="text-white" />
+              </div>
+              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-900" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                DNA Lab
+                <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 tracking-wider">ADVANCED</span>
+              </h3>
+              <p className="text-[11px] text-slate-400">Analyse · compare · monitor your assets</p>
+            </div>
+            <ChevronRight size={18} className="text-fuchsia-300" />
+          </div>
+          <div className="relative grid grid-cols-4 gap-2">
+            {[
+              { i: '🔍', l: 'Find Similar' },
+              { i: '⚖️', l: 'Compare' },
+              { i: '📡', l: 'Monitor' },
+              { i: '📄', l: 'Report' },
+            ].map((f) => (
+              <div key={f.l} className="rounded-xl bg-white/[.06] border border-white/10 py-2.5 flex flex-col items-center gap-1">
+                <span className="text-base leading-none">{f.i}</span>
+                <span className="text-[8.5px] text-slate-300 font-semibold text-center leading-tight">{f.l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </motion.button>
+
+      {/* Vault DNA Button */}
+      {(() => {
+        const dnaDocs = vaultDocs.filter(d => String((d as any).id || '').startsWith('upload_'));
+        return (
+          <>
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowVaultDna(!showVaultDna)}
+              className="w-full relative overflow-hidden rounded-2xl p-[1.5px] bg-gradient-to-r from-orange-500 via-fuchsia-500 to-violet-600 shadow-lg"
+            >
+              <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 px-4 py-3 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-fuchsia-600 flex items-center justify-center flex-shrink-0">
+                  <Fingerprint size={18} className="text-white" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-bold text-white">Vault DNA</p>
+                  <p className="text-[10px] text-slate-400">Files fingerprinted via Generate DNA</p>
+                </div>
+                <span className="text-sm font-black text-fuchsia-300 bg-fuchsia-500/15 border border-fuchsia-500/30 rounded-full w-7 h-7 flex items-center justify-center">
+                  {dnaDocs.length}
+                </span>
+                <ChevronRight size={14} className={`text-slate-400 transition-transform ${showVaultDna ? 'rotate-90' : ''}`} />
+              </div>
+            </motion.button>
+
+            <AnimatePresence>
+              {showVaultDna && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-slate-900/80 border border-fuchsia-500/20 rounded-2xl p-4 space-y-2">
+                    <p className="text-xs font-bold text-fuchsia-300 uppercase tracking-widest mb-3">
+                      🧬 DNA-Generated Files · {dnaDocs.length}
+                    </p>
+                    {dnaDocs.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-4">
+                        No files yet — use Generate DNA to fingerprint &amp; store files here
+                      </p>
+                    ) : (
+                      dnaDocs.map((doc, idx) => {
+                        const name = getSafeName(doc);
+                        const raw = (doc as any).encryptedData || '';
+                        const isImg = raw.startsWith('data:image');
+                        return (
+                          <motion.div
+                            key={(doc as any).id || idx}
+                            initial={{ opacity: 0, x: -8 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.04 }}
+                            className="flex items-center gap-3 bg-slate-800/50 border border-slate-700/40 rounded-xl p-2.5"
+                          >
+                            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-slate-900 border border-slate-700 flex items-center justify-center">
+                              {isImg ? (
+                                <img src={raw} alt={name} className="w-full h-full object-cover" />
+                              ) : (
+                                <FileText className="w-4 h-4 text-fuchsia-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-white truncate">{name}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 rounded-full px-1.5 py-0.5">✓ DNA</span>
+                                <span className="text-[9px] text-fuchsia-400 font-bold bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-full px-1.5 py-0.5">Encrypted</span>
+                              </div>
+                            </div>
+                            <Fingerprint className="w-3.5 h-3.5 text-fuchsia-500 flex-shrink-0" />
+                          </motion.div>
+                        );
+                      })
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        );
+      })()}
 
       {/* Digital Identity Button */}
       <button
@@ -2775,10 +2931,39 @@ function SharePage({
   userId: string | null;
   vaultDocuments: VaultDocument[];
 }) {
+  const [configTab, setConfigTab] = useState<'access' | 'security' | 'tracking'>('access');
+  const [oneTimeUse, setOneTimeUse] = useState(false);
+  const [blockVpn, setBlockVpn] = useState(false);
+  const [requireOtp, setRequireOtp] = useState(false);
+  const [geoFence, setGeoFence] = useState('all');
+  const [deviceLock, setDeviceLock] = useState<'all' | 'mobile' | 'desktop'>('all');
+  const [enableChainTracking, setEnableChainTracking] = useState(true);
+  const [enableWatermark, setEnableWatermark] = useState(false);
+  const [alertOnOpen, setAlertOnOpen] = useState(false);
+  const [alertOnForward, setAlertOnForward] = useState(false);
+  const [disableRightClick, setDisableRightClick] = useState(false);
+
+  const securityScore = Math.min(100, [
+    sharePassword ? 20 : 0,
+    shareExpiryDate ? 10 : 0,
+    shareDownloadLimit ? 10 : 0,
+    oneTimeUse ? 15 : 0,
+    blockVpn ? 10 : 0,
+    requireOtp ? 15 : 0,
+    geoFence !== 'all' ? 10 : 0,
+    deviceLock !== 'all' ? 5 : 0,
+    enableChainTracking ? 5 : 0,
+    enableWatermark ? 10 : 0,
+    disableRightClick ? 5 : 0,
+  ].reduce((a, b) => a + b, 0));
+
+  const scoreColor = securityScore >= 70 ? 'text-emerald-400' : securityScore >= 40 ? 'text-amber-400' : 'text-red-400';
+  const scoreBg = securityScore >= 70 ? 'bg-emerald-500' : securityScore >= 40 ? 'bg-amber-500' : 'bg-red-500';
+
   const generateShareLink = () => {
     // Generate unique share ID
     const shareId = `share_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const baseUrl = window.location.origin;
+    const baseUrl = 'https://pinit-vault-app.onrender.com';
     const link = `${baseUrl}/share/${shareId}`;
     return link;
   };
@@ -2792,8 +2977,7 @@ function SharePage({
 
       // Generate share ID and link locally — no backend call needed
       const shareId = `share_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      const publicUrl = (import.meta.env.VITE_PUBLIC_URL as string | undefined)
-        || 'https://pinit-vault-app.onrender.com';
+      const publicUrl = 'https://pinit-vault-app.onrender.com';
       const shareLink = `${publicUrl}/share/${shareId}`;
 
       setGeneratedShareLink(shareLink);
@@ -2812,6 +2996,13 @@ function SharePage({
         qrCodeData: shareLink,
         createdAt: new Date().toLocaleString(),
         createdBy: userId || "Unknown",
+        enableChainTracking,
+        enableWatermark,
+        blockVpn,
+        requireOtp,
+        alertOnOpen,
+        alertOnForward,
+        disableRightClick,
       };
 
       // ── Resolve a displayable image URL for the share ─────────────────────
@@ -3143,120 +3334,285 @@ function SharePage({
         </motion.div>
       )}
 
-      {/* STEP 2: CONFIGURE SHARING */}
+      {/* STEP 2: CONFIGURE SHARING — Redesigned */}
       {shareStep === "configure" && selectedShareImage && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="space-y-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="space-y-3 pb-4"
         >
-          <div className="bg-gradient-to-br from-slate-800/40 to-purple-900/30 border border-purple-500/30 backdrop-blur-xl rounded-2xl p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-white">⚙️ Configure Share Settings</h2>
-              <button
-                onClick={() => setShareStep("select")}
-                className="text-purple-400 hover:text-purple-300 text-sm"
-              >
-                ← Back
-              </button>
-            </div>
-            <p className="text-purple-300/80 text-sm">Sharing: <span className="font-bold text-purple-200">{selectedShareImage.name}</span></p>
-
-            <div className="space-y-4 mt-4">
-              {/* EXPIRY DATE & TIME */}
-              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <Clock className="w-5 h-5 text-blue-400" />
-                  <label className="font-semibold text-white">Share Expiry</label>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="date"
-                    value={shareExpiryDate}
-                    onChange={(e) => setShareExpiryDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
-                    placeholder="Select date"
-                  />
-                  <input
-                    type="time"
-                    value={shareExpiryTime}
-                    onChange={(e) => setShareExpiryTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
-                  />
-                </div>
-                <p className="text-xs text-purple-300/60 mt-2">Leave blank for no expiry</p>
-              </motion.div>
-
-              {/* DOWNLOAD LIMIT */}
-              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <Download className="w-5 h-5 text-green-400" />
-                  <label className="font-semibold text-white">Download Limit</label>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  value={shareDownloadLimit || ""}
-                  onChange={(e) => setShareDownloadLimit(e.target.value ? parseInt(e.target.value) : null)}
-                  className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
-                  placeholder="Unlimited downloads (leave blank)"
-                />
-                <p className="text-xs text-purple-300/60 mt-2">Number of times this link can be downloaded</p>
-              </motion.div>
-
-              {/* PASSWORD PROTECTION */}
-              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <Lock className="w-5 h-5 text-orange-400" />
-                  <label className="font-semibold text-white">Password Protection</label>
-                </div>
-                <input
-                  type="password"
-                  value={sharePassword}
-                  onChange={(e) => setSharePassword(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500/70 outline-none"
-                  placeholder="Leave blank for no password"
-                />
-                {sharePassword && (
-                  <p className="text-xs text-green-400 mt-2">✓ Password protected</p>
-                )}
-              </motion.div>
-
-              {/* CERTIFICATE SHARING */}
-              <motion.div className="p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Award className="w-5 h-5 text-yellow-400" />
-                    <label className="font-semibold text-white">Include Certificate</label>
+          {/* Header */}
+          <div className="relative overflow-hidden rounded-2xl border border-fuchsia-500/30 bg-[#0d0a1a]">
+            <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-600/10 via-violet-600/5 to-transparent" />
+            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-fuchsia-500/60 to-transparent" />
+            <div className="relative px-4 pt-4 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-600 to-violet-600 flex items-center justify-center">
+                    <Share2 className="w-4 h-4 text-white" />
                   </div>
-                  <button
-                    onClick={() => setIncludeCertificate(!includeCertificate)}
-                    className={`w-10 h-6 rounded-full transition-all ${
-                      includeCertificate
-                        ? "bg-gradient-to-r from-purple-600 to-blue-600"
-                        : "bg-slate-600"
-                    }`}
-                  />
+                  <div>
+                    <h2 className="text-base font-black text-white leading-tight">Configure Share</h2>
+                    <p className="text-[10px] text-fuchsia-300/70">PINIT Smart Link</p>
+                  </div>
                 </div>
-                <p className="text-xs text-purple-300/60 mt-2">Share authorship certificate with recipient</p>
-              </motion.div>
+                <button
+                  onClick={() => setShareStep("select")}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-white bg-slate-800/60 border border-slate-700/50 rounded-full px-3 py-1.5 transition-all"
+                >
+                  <ArrowLeft className="w-3 h-3" /> Back
+                </button>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-900/60 rounded-xl px-3 py-2 border border-slate-700/40">
+                <FileText className="w-3.5 h-3.5 text-fuchsia-400 flex-shrink-0" />
+                <p className="text-xs text-slate-200 truncate font-medium">{selectedShareImage.name}</p>
+              </div>
             </div>
-
-            <Button
-              onClick={async () => {
-                try {
-                  await handleGenerateShare();
-                } catch (err) {
-                  console.error("❌ Share button error:", err);
-                  alert(`❌ Share error: ${(err as any)?.message || String(err)}`);
-                }
-              }}
-              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold shadow-lg hover:shadow-xl transition-all mt-4"
-            >
-              ✨ Generate Share Link
-            </Button>
           </div>
+
+          {/* Security score bar */}
+          <div className="bg-[#0d0a1a] border border-slate-700/50 rounded-2xl px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-300">Security Score</span>
+              <motion.span
+                key={securityScore}
+                initial={{ scale: 1.3 }}
+                animate={{ scale: 1 }}
+                className={`text-sm font-black ${scoreColor}`}
+              >
+                {securityScore}/100
+              </motion.span>
+            </div>
+            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+              <motion.div
+                className={`h-full rounded-full ${scoreBg}`}
+                initial={{ width: 0 }}
+                animate={{ width: `${securityScore}%` }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1.5">
+              {securityScore >= 70 ? '🛡 Strong protection enabled' : securityScore >= 40 ? '⚠ Moderate — enable more options' : '🔓 Weak — enable security options'}
+            </p>
+          </div>
+
+          {/* Tab bar */}
+          <div className="flex gap-1 p-1 bg-[#0d0a1a] border border-slate-700/40 rounded-2xl">
+            {([
+              { id: 'access' as const, label: 'Access', icon: '🔑' },
+              { id: 'security' as const, label: 'Security', icon: '🛡' },
+              { id: 'tracking' as const, label: 'Tracking', icon: '📡' },
+            ] as const).map((t) => (
+              <motion.button
+                key={t.id}
+                onClick={() => setConfigTab(t.id)}
+                whileTap={{ scale: 0.97 }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  configTab === t.id
+                    ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-lg shadow-fuchsia-900/40'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>{t.icon}</span> {t.label}
+              </motion.button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <motion.div
+            key={configTab}
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            className="bg-[#0d0a1a] border border-slate-700/40 rounded-2xl p-4 space-y-2.5"
+          >
+            {configTab === 'access' && (
+              <>
+                {/* Expiry */}
+                <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-900/10 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Clock className="w-4 h-4 text-fuchsia-400" />
+                    <span className="text-sm font-bold text-white">Share Expiry</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={shareExpiryDate} onChange={(e) => setShareExpiryDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-800/80 border border-fuchsia-500/20 rounded-xl text-white text-xs focus:border-fuchsia-500/60 outline-none transition-colors" />
+                    <input type="time" value={shareExpiryTime} onChange={(e) => setShareExpiryTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-800/80 border border-fuchsia-500/20 rounded-xl text-white text-xs focus:border-fuchsia-500/60 outline-none transition-colors" />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1.5">Leave blank for no expiry</p>
+                </div>
+
+                {/* Download limit */}
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-900/10 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span className="text-sm font-bold text-white">Download Limit</span>
+                  </div>
+                  <input type="number" min="0" max="1000" value={shareDownloadLimit || ""}
+                    onChange={(e) => setShareDownloadLimit(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-emerald-500/20 rounded-xl text-white text-xs focus:border-emerald-500/60 outline-none transition-colors"
+                    placeholder="Unlimited (leave blank)" />
+                </div>
+
+                {/* Password */}
+                <div className="rounded-xl border border-orange-500/20 bg-orange-900/10 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Lock className="w-4 h-4 text-orange-400" />
+                    <span className="text-sm font-bold text-white">Password Protection</span>
+                  </div>
+                  <input type="password" value={sharePassword} onChange={(e) => setSharePassword(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-orange-500/20 rounded-xl text-white text-xs focus:border-orange-500/60 outline-none transition-colors"
+                    placeholder="Leave blank for no password" />
+                  {sharePassword && (
+                    <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-emerald-400 mt-1.5 flex items-center gap-1">
+                      <Check className="w-2.5 h-2.5" /> Password set
+                    </motion.p>
+                  )}
+                </div>
+
+                {/* Toggles */}
+                {[
+                  { label: 'One-time Use', sub: 'Link expires after first open', val: oneTimeUse, set: setOneTimeUse, color: 'from-fuchsia-600 to-violet-600' },
+                  { label: 'Include Certificate', sub: 'Share authorship certificate', val: includeCertificate, set: setIncludeCertificate, color: 'from-amber-500 to-orange-500', icon: '🏆' },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-3.5 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-white">{item.label}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{item.sub}</p>
+                    </div>
+                    <button onClick={() => item.set(!item.val)}
+                      className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${item.val ? `bg-gradient-to-r ${item.color}` : 'bg-slate-700'}`}>
+                      <motion.span animate={{ left: item.val ? '22px' : '2px' }}
+                        className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md" style={{ position: 'absolute' }} />
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {configTab === 'security' && (
+              <>
+                {[
+                  { label: 'Block VPN / Proxy', sub: 'Reject anonymized access', val: blockVpn, set: setBlockVpn, color: 'from-red-600 to-orange-600', icon: '🚫' },
+                  { label: 'Require OTP', sub: 'Verify via one-time passcode', val: requireOtp, set: setRequireOtp, color: 'from-fuchsia-600 to-violet-600', icon: '🔢' },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-3.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{item.icon}</span>
+                      <div>
+                        <p className="text-sm font-bold text-white">{item.label}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{item.sub}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => item.set(!item.val)}
+                      className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${item.val ? `bg-gradient-to-r ${item.color}` : 'bg-slate-700'}`}>
+                      <motion.span animate={{ left: item.val ? '22px' : '2px' }}
+                        className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md" style={{ position: 'absolute' }} />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Geofence */}
+                <div className="rounded-xl border border-blue-500/20 bg-blue-900/10 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <span className="text-base">🌍</span>
+                    <span className="text-sm font-bold text-white">Geofence</span>
+                  </div>
+                  <select value={geoFence} onChange={(e) => setGeoFence(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-blue-500/20 rounded-xl text-white text-xs focus:border-blue-500/60 outline-none">
+                    <option value="all">Allow All Countries</option>
+                    <option value="US">United States only</option>
+                    <option value="IN">India only</option>
+                    <option value="GB">United Kingdom only</option>
+                    <option value="CA">Canada only</option>
+                    <option value="AU">Australia only</option>
+                    <option value="DE">Germany only</option>
+                    <option value="FR">France only</option>
+                    <option value="JP">Japan only</option>
+                    <option value="SG">Singapore only</option>
+                    <option value="BR">Brazil only</option>
+                  </select>
+                </div>
+
+                {/* Device lock */}
+                <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <span className="text-base">📱</span>
+                    <span className="text-sm font-bold text-white">Device Lock</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {(['all', 'mobile', 'desktop'] as const).map((opt) => (
+                      <button key={opt} onClick={() => setDeviceLock(opt)}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border ${
+                          deviceLock === opt ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 border-fuchsia-500/50 text-white shadow-sm' : 'bg-slate-800/50 border-slate-700/50 text-slate-400'
+                        }`}>
+                        {opt === 'all' ? 'All' : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {configTab === 'tracking' && (
+              <>
+                {[
+                  { label: 'Chain Tracking', sub: 'Track link forwarding A→B→C', val: enableChainTracking, set: setEnableChainTracking, icon: '🔗', color: 'from-fuchsia-600 to-violet-600' },
+                  { label: 'Dynamic Watermark', sub: 'User-specific watermark on content', val: enableWatermark, set: setEnableWatermark, icon: '💧', color: 'from-cyan-600 to-blue-600' },
+                  { label: 'Alert on Open', sub: 'Notify when link is opened', val: alertOnOpen, set: setAlertOnOpen, icon: '🔔', color: 'from-violet-600 to-purple-600' },
+                  { label: 'Alert on Forward', sub: 'Alert when link is forwarded', val: alertOnForward, set: setAlertOnForward, icon: '📨', color: 'from-amber-500 to-orange-500' },
+                  { label: 'Content Protection', sub: 'Disable right-click, copy, print', val: disableRightClick, set: setDisableRightClick, icon: '🔒', color: 'from-red-600 to-rose-600' },
+                ].map((item, idx) => (
+                  <motion.div key={item.label}
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
+                    className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-3.5 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base w-6 text-center">{item.icon}</span>
+                      <div>
+                        <p className="text-sm font-bold text-white">{item.label}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{item.sub}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => item.set(!item.val)}
+                      className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${item.val ? `bg-gradient-to-r ${item.color}` : 'bg-slate-700'}`}>
+                      <motion.span animate={{ left: item.val ? '22px' : '2px' }}
+                        className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md" style={{ position: 'absolute' }} />
+                    </button>
+                  </motion.div>
+                ))}
+              </>
+            )}
+          </motion.div>
+
+          {/* Generate button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={async () => {
+              try {
+                await handleGenerateShare();
+              } catch (err) {
+                console.error("❌ Share button error:", err);
+                alert(`❌ Share error: ${(err as any)?.message || String(err)}`);
+              }
+            }}
+            className="w-full relative overflow-hidden rounded-2xl py-4 font-black text-white text-sm tracking-wide shadow-xl"
+            style={{ background: 'linear-gradient(135deg, #a21caf 0%, #7c3aed 50%, #2563eb 100%)' }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12"
+              initial={{ x: '-150%' }}
+              whileHover={{ x: '150%' }}
+              transition={{ duration: 0.6 }}
+            />
+            <span className="relative flex items-center justify-center gap-2">
+              <Share2 className="w-4 h-4" />
+              Generate Share Link
+            </span>
+          </motion.button>
         </motion.div>
       )}
 
