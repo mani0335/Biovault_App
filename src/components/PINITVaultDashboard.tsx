@@ -1069,24 +1069,11 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
       {/* Content Area */}
       <AnimatePresence mode="wait">
         {currentPage === "home" && <HomePage key="home" userName={userName} documentCount={vaultDocuments.length} activeSharesCount={shareConfigs.length} onEncryptClick={async () => {
-          try {
-            const image = await CapacitorCamera.getPhoto({
-              quality: 80,
-              allowEditing: false,
-              source: CameraSource.Camera,
-              resultType: CameraResultType.Base64,
-              width: 1024,
-              height: 1024,
-              correctOrientation: true,
-            });
-            if (image?.base64String) {
-              setCapturedImage("data:image/jpeg;base64," + image.base64String);
-              setCurrentPage("encrypt-preview");
-            }
-          } catch (error) {
-            console.error("Camera error:", error);
-            alert("Failed to open camera. Please check camera permissions.");
-          }
+          // Use getUserMedia in-app camera instead of CapacitorCamera.getPhoto().
+          // CapacitorCamera opens a separate Android Activity which can kill the WebView
+          // and wipe the auth session (same issue fixed for PINIT Live and LiveScanner).
+          // We navigate to generate-dna which has a full in-app getUserMedia camera flow.
+          setCurrentPage("generate-dna");
         }} setVerifyProofImage={setVerifyProofImage} setCurrentPage={setCurrentPage} quickActionCameraRef={quickActionCameraRef} quickActionFileRef={quickActionFileRef} onQuickActionImageSelected={handleQuickActionImageSelected} onVerifyProofImageSelected={handleVerifyProofImageSelected} navigate={navigate} />}
         {currentPage === "vault" && <VaultPage key="vault" documents={vaultDocuments} userId={userId} userName={userName} selectedShareImage={selectedShareImage} setSelectedShareImage={setSelectedShareImage} setCurrentPage={setCurrentPage} setVerifyProofImage={setVerifyProofImage} onStartShare={() => {
           // Reset share flow so the user always starts fresh on the configure step
