@@ -147,6 +147,56 @@ export const SharedImageViewer: React.FC = () => {
           .eq('share_id', token)
           .then(() => {});
 
+        // ── Capture viewer GPS + device at delivery time (Scenario 1 point 3) ──
+        // This runs fire-and-forget so it never blocks the page load.
+        (async () => {
+          try {
+            const viewerInfo: Record<string, unknown> = {
+              share_id: token,
+              opened_at: new Date().toISOString(),
+              user_agent: navigator.userAgent,
+              language: navigator.language,
+              platform: navigator.platform,
+              screen: `${screen.width}x${screen.height}`,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            };
+
+            // Try GPS (requires user permission — silently skip if denied)
+            try {
+              const pos = await new Promise<GeolocationPosition>((res, rej) =>
+                navigator.geolocation.getCurrentPosition(res, rej, {
+                  enableHighAccuracy: false,
+                  timeout: 8000,
+                  maximumAge: 300000,
+                })
+              );
+              viewerInfo.viewer_lat = pos.coords.latitude;
+              viewerInfo.viewer_lng = pos.coords.longitude;
+              viewerInfo.viewer_accuracy = pos.coords.accuracy;
+
+              // Reverse geocode (best-effort)
+              try {
+                const geo = await fetch(
+                  `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json`,
+                  { headers: { 'User-Agent': 'PINIT-Vault/1.0' } }
+                );
+                const geoJson = await geo.json();
+                viewerInfo.viewer_city = geoJson.address?.city || geoJson.address?.town || geoJson.address?.village || null;
+                viewerInfo.viewer_country = geoJson.address?.country || null;
+              } catch { /* geocode failed */ }
+            } catch { /* GPS permission denied or unavailable */ }
+
+            // Log access event to Supabase scan_events (fire-and-forget)
+            await (supabase as any).from('scan_events').insert({
+              dna_id: token,
+              event_type: 'share_accessed',
+              user_id: row.user_id,
+              metadata: JSON.stringify(viewerInfo),
+              created_at: new Date().toISOString(),
+            });
+          } catch { /* silent — viewer tracking must never crash the viewer */ }
+        })();
+
         // Log view activity for the document owner
         logActivityEvent({
           userId: row.user_id,

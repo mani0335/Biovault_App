@@ -110,6 +110,7 @@ import { SecurePdfViewer } from "@/components/SecurePdfViewer";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { FileOwnershipPanel } from "@/components/FileOwnershipPanel";
 import ShareOptionsPanel from "@/components/ShareOptionsPanel";
+import SecurityCenter from "@/components/SecurityCenter";
 
 interface VaultDocument {
   id: string;
@@ -160,7 +161,7 @@ interface PINITDashboardProps {
   isRestricted?: boolean;
 }
 
-type PageType = "home" | "vault" | "portfolio" | "share" | "identity" | "encrypt-preview" | "verify-proof" | "live-scan" | "crypto" | "vault-advanced" | "activity" | "profile" | "analysis" | "upload-document" | "scan-document" | "review-scan" | "dna-lab" | "generate-dna";
+type PageType = "home" | "vault" | "portfolio" | "share" | "identity" | "encrypt-preview" | "verify-proof" | "live-scan" | "crypto" | "vault-advanced" | "activity" | "profile" | "analysis" | "upload-document" | "scan-document" | "review-scan" | "dna-lab" | "generate-dna" | "security-center";
 
 // ============= SHARE ACCESS PAGE =============
 function ShareAccessPage() {
@@ -1110,6 +1111,13 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
         {currentPage === "crypto" && <ImageCryptoFull key="crypto" userId={userId || undefined} />}
         {currentPage === "vault-advanced" && <VaultManager key="vault-advanced" userId={userId || undefined} />}
         {currentPage === "activity" && <ActivityLogger key="activity" userId={userId || undefined} />}
+        {currentPage === "security-center" && (
+          <SecurityCenter
+            key="security-center"
+            userId={userId}
+            onBack={() => setCurrentPage("home")}
+          />
+        )}
         {currentPage === "profile" && (
           <DigitalIdentityDashboard
             key="profile"
@@ -1521,7 +1529,7 @@ function HomePage({ userName, documentCount, activeSharesCount, onEncryptClick, 
             { icon: Camera, label: "Encrypt", sub: "Camera", color: "bg-blue-100", iconColor: "text-blue-600", onClick: () => onEncryptClick() },
             { icon: Search, label: "Scan", sub: "Live", color: "bg-violet-100", iconColor: "text-violet-600", onClick: () => setCurrentPage("live-scan") },
             { icon: Fingerprint, label: "PINIT DNA", sub: "DNA", color: "bg-rose-100", iconColor: "text-rose-600", onClick: () => setCurrentPage("generate-dna") },
-            { icon: Share2, label: "Share", sub: "Links", color: "bg-emerald-100", iconColor: "text-emerald-600", onClick: () => setCurrentPage("share") },
+            { icon: ShieldCheck, label: "Security", sub: "Center", color: "bg-red-100", iconColor: "text-red-600", onClick: () => setCurrentPage("security-center") },
           ].map((action, idx) => (
             <motion.button
               key={idx}

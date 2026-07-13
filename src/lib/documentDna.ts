@@ -367,6 +367,157 @@ async function metadataSummary(dataUrl: string, isImage: boolean, fileName: stri
   return exifPart ? `${exifPart} · ${base}` : base;
 }
 
+// ─── L9 — Color Histogram Signature (quadrant-based) ────────────────────────
+/**
+ * Split image into 4 quadrants, compute average R/G/B per quadrant.
+ * Returns a hex string: r0g0b0|r1g1b1|r2g2b2|r3g3b3
+ */
+export function computeColorHistogram(ctx: CanvasRenderingContext2D, w: number, h: number): string {
+  try {
+    const hw = Math.max(1, Math.floor(w / 2));
+    const hh = Math.max(1, Math.floor(h / 2));
+    const quadrants = [
+      ctx.getImageData(0, 0, hw, hh),
+      ctx.getImageData(hw, 0, w - hw, hh),
+      ctx.getImageData(0, hh, hw, h - hh),
+      ctx.getImageData(hw, hh, w - hw, h - hh),
+    ];
+    return quadrants.map((q) => {
+      const d = q.data;
+      const n = q.width * q.height;
+      if (n === 0) return '000000';
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < n; i++) {
+        r += d[i * 4];
+        g += d[i * 4 + 1];
+        b += d[i * 4 + 2];
+      }
+      const avg = (v: number) => Math.round(v / n).toString(16).padStart(2, '0');
+      return `${avg(r)}${avg(g)}${avg(b)}`;
+    }).join('|');
+  } catch {
+    return '';
+  }
+}
+
+// ─── L10 — Block DCT Grid Signature (8×8 grid) ──────────────────────────────
+/**
+ * Divide image into 8×8 grid of blocks, compute average luminance per block.
+ * Returns a 128-char hex string (2 hex chars per block × 64 blocks).
+ */
+export function computeBlockDct(ctx: CanvasRenderingContext2D, w: number, h: number): string {
+  try {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const d = imageData.data;
+    const GRID = 8;
+    let result = '';
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const x0 = Math.floor((gx / GRID) * w);
+        const x1 = Math.floor(((gx + 1) / GRID) * w);
+        const y0 = Math.floor((gy / GRID) * h);
+        const y1 = Math.floor(((gy + 1) / GRID) * h);
+        let lum = 0, count = 0;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const idx = (y * w + x) * 4;
+            lum += 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2];
+            count++;
+          }
+        }
+        const avg = count > 0 ? Math.min(255, Math.round(lum / count)) : 0;
+        result += avg.toString(16).padStart(2, '0');
+      }
+    }
+    return result.toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+// ─── L11 — Edge Density Map (Sobel on 32×32 downsample) ─────────────────────
+/**
+ * Downsample image to 32×32, apply simplified Sobel, threshold at 30,
+ * encode the resulting binary map as a hex bitfield string.
+ */
+export function computeEdgeDensity(ctx: CanvasRenderingContext2D, w: number, h: number): string {
+  try {
+    const S = 32;
+    // Draw into a 32×32 offscreen canvas to get the downsampled pixels
+    const offscreen = document.createElement('canvas');
+    offscreen.width = S;
+    offscreen.height = S;
+    const offCtx = offscreen.getContext('2d');
+    if (!offCtx) return '';
+    // Draw the already-drawn image from the source ctx by extracting it
+    const srcCanvas = ctx.canvas;
+    offCtx.drawImage(srcCanvas, 0, 0, S, S);
+    const data = offCtx.getImageData(0, 0, S, S).data;
+    // Convert to grayscale
+    const gray: number[] = [];
+    for (let i = 0; i < S * S; i++) {
+      gray.push(0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]);
+    }
+    // Sobel magnitude for interior pixels; border pixels = 0
+    const bits: number[] = new Array(S * S).fill(0);
+    const THRESHOLD = 30;
+    for (let y = 1; y < S - 1; y++) {
+      for (let x = 1; x < S - 1; x++) {
+        const gx = gray[(y - 1) * S + (x + 1)] - gray[(y - 1) * S + (x - 1)]
+                 + 2 * gray[y * S + (x + 1)] - 2 * gray[y * S + (x - 1)]
+                 + gray[(y + 1) * S + (x + 1)] - gray[(y + 1) * S + (x - 1)];
+        const gy = gray[(y - 1) * S + (x - 1)] + 2 * gray[(y - 1) * S + x] + gray[(y - 1) * S + (x + 1)]
+                 - gray[(y + 1) * S + (x - 1)] - 2 * gray[(y + 1) * S + x] - gray[(y + 1) * S + (x + 1)];
+        bits[y * S + x] = Math.sqrt(gx * gx + gy * gy) >= THRESHOLD ? 1 : 0;
+      }
+    }
+    // Pack 4 bits per hex char
+    let hex = '';
+    for (let i = 0; i < S * S; i += 4) {
+      const nibble = (bits[i] << 3) | (bits[i + 1] << 2) | (bits[i + 2] << 1) | bits[i + 3];
+      hex += nibble.toString(16);
+    }
+    return hex.toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+// ─── L12 — Dominant Color Palette (top-5 quantized) ─────────────────────────
+/**
+ * Sample 200 random pixels, quantize to 6-bit color (R>>2, G>>2, B>>2),
+ * find top-5 most frequent, return as comma-separated rrggbb hex strings.
+ */
+export function computeDominantPalette(ctx: CanvasRenderingContext2D, w: number, h: number): string {
+  try {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const d = imageData.data;
+    const total = w * h;
+    const SAMPLES = 200;
+    const freq: Map<number, number> = new Map();
+    for (let s = 0; s < SAMPLES; s++) {
+      const idx = Math.floor(Math.random() * total);
+      const r6 = d[idx * 4] >> 2;
+      const g6 = d[idx * 4 + 1] >> 2;
+      const b6 = d[idx * 4 + 2] >> 2;
+      const key = (r6 << 12) | (g6 << 6) | b6;
+      freq.set(key, (freq.get(key) ?? 0) + 1);
+    }
+    const top5 = [...freq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([key]) => {
+        const r = ((key >> 12) & 0x3f) << 2;
+        const g = ((key >> 6) & 0x3f) << 2;
+        const b = (key & 0x3f) << 2;
+        return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+      });
+    return top5.join(',').toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
 // ─── Similarity helpers (for Verify + Diff) ─────────────────────────────────
 function hexHamming(h1: string | null, h2: string | null): number | null {
   if (!h1 || !h2 || h1.length !== h2.length) return null;
@@ -500,6 +651,184 @@ export async function generateDocumentDNA(
     sizeBytes,
     composedAt,
   };
+}
+
+// ─── Public: Extended DNA (L1-L8 + record persistence) ─────────────────────
+
+import { buildOwnershipDna } from '@/lib/dna/ownershipDna';
+import { captureDeviceNetworkDna } from '@/lib/dna/deviceNetworkDna';
+import { saveDnaRecord } from '@/lib/dna/dnaRecordStore';
+import { appendCustodyEvent } from '@/lib/dna/chainOfCustody';
+import type { OwnershipDna, DeviceNetworkDna, DnaRecord } from '@/lib/dna/types';
+
+export interface ExtendedDocumentDNA extends DocumentDNA {
+  ownership: OwnershipDna | null;
+  deviceNetwork: DeviceNetworkDna | null;
+}
+
+export async function generateExtendedDocumentDNA(
+  dataUrl: string,
+  fileName: string,
+  mimeType: string,
+  sizeBytes: number,
+  ctx: { userId: string; ownerName?: string; vaultId?: string },
+): Promise<ExtendedDocumentDNA> {
+  const baseDna = await generateDocumentDNA(dataUrl, fileName, mimeType, sizeBytes);
+
+  // L7 — Ownership DNA
+  let ownership: OwnershipDna | null = null;
+  const ownerStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  try {
+    ownership = await buildOwnershipDna({
+      userId: ctx.userId,
+      ownerName: ctx.ownerName,
+      dnaId: baseDna.dnaId,
+      sha256: baseDna.sha256,
+      vaultId: ctx.vaultId,
+    });
+  } catch { /* ownership build failed */ }
+  const ownerMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - ownerStart);
+  baseDna.layers.push({
+    id: 'L7', key: 'ownership', name: 'Ownership DNA',
+    detail: 'Owner identity + digital signature',
+    status: ownership ? 'complete' : 'failed', durationMs: ownerMs,
+  });
+
+  // L8 — Device & Network DNA
+  let deviceNetwork: DeviceNetworkDna | null = null;
+  const devStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  try {
+    deviceNetwork = await captureDeviceNetworkDna();
+  } catch { /* device capture failed */ }
+  const devMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - devStart);
+  baseDna.layers.push({
+    id: 'L8', key: 'device', name: 'Device & Network DNA',
+    detail: 'Device fingerprint + geo + network',
+    status: deviceNetwork ? 'complete' : 'failed', durationMs: devMs,
+  });
+
+  // ── Advanced visual fingerprint layers (L9–L12) ──────────────────────────
+  // These require an offscreen canvas rendered from the visual image.
+  // Build one shared canvas/context so each layer can read pixels without
+  // re-rendering. Any layer that fails leaves its field null.
+
+  let advColorHistogram: string | null = null;
+  let advBlockDct: string | null = null;
+  let advEdgeDensity: string | null = null;
+  let advDominantPalette: string | null = null;
+
+  const advBytes = dataUrlToBytes(dataUrl);
+  const img = await getVisualImage(dataUrl, mimeType, advBytes);
+  if (img) {
+    try {
+      const CAP = 256;
+      const scale = Math.min(1, CAP / Math.max(img.width || 1, img.height || 1));
+      const cw = Math.max(1, Math.round((img.width || CAP) * scale));
+      const ch = Math.max(1, Math.round((img.height || CAP) * scale));
+      const advCanvas = document.createElement('canvas');
+      advCanvas.width = cw;
+      advCanvas.height = ch;
+      const advCtx = advCanvas.getContext('2d');
+      if (advCtx) {
+        advCtx.drawImage(img, 0, 0, cw, ch);
+
+        // L9 — Color Histogram Signature
+        {
+          const s = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          try { advColorHistogram = computeColorHistogram(advCtx, cw, ch) || null; } catch { /* failed */ }
+          baseDna.layers.push({
+            id: 'L9', key: 'colorHistogram', name: 'Color Histogram Signature',
+            detail: '4-quadrant RGB average hex',
+            status: advColorHistogram ? 'complete' : 'failed',
+            durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - s),
+          });
+        }
+
+        // L10 — Block DCT Grid Signature
+        {
+          const s = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          try { advBlockDct = computeBlockDct(advCtx, cw, ch) || null; } catch { /* failed */ }
+          baseDna.layers.push({
+            id: 'L10', key: 'blockDct', name: 'Block DCT Grid Signature',
+            detail: '8×8 grid luminance hex',
+            status: advBlockDct ? 'complete' : 'failed',
+            durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - s),
+          });
+        }
+
+        // L11 — Edge Density Map
+        {
+          const s = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          try { advEdgeDensity = computeEdgeDensity(advCtx, cw, ch) || null; } catch { /* failed */ }
+          baseDna.layers.push({
+            id: 'L11', key: 'edgeDensity', name: 'Edge Density Map',
+            detail: 'Sobel 32×32 bitfield hex',
+            status: advEdgeDensity ? 'complete' : 'failed',
+            durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - s),
+          });
+        }
+
+        // L12 — Dominant Color Palette
+        {
+          const s = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          try { advDominantPalette = computeDominantPalette(advCtx, cw, ch) || null; } catch { /* failed */ }
+          baseDna.layers.push({
+            id: 'L12', key: 'dominantPalette', name: 'Dominant Color Palette',
+            detail: 'Top-5 quantized colors hex',
+            status: advDominantPalette ? 'complete' : 'failed',
+            durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - s),
+          });
+        }
+      }
+    } catch { /* offscreen canvas unavailable — skip advanced layers */ }
+  } else {
+    // No visual image available — mark advanced layers as skipped
+    for (const [id, key, name, detail] of [
+      ['L9', 'colorHistogram', 'Color Histogram Signature', '4-quadrant RGB average hex'],
+      ['L10', 'blockDct', 'Block DCT Grid Signature', '8×8 grid luminance hex'],
+      ['L11', 'edgeDensity', 'Edge Density Map', 'Sobel 32×32 bitfield hex'],
+      ['L12', 'dominantPalette', 'Dominant Color Palette', 'Top-5 quantized colors hex'],
+    ] as const) {
+      baseDna.layers.push({ id, key, name, detail, status: 'skipped', durationMs: 0 });
+    }
+  }
+
+  baseDna.layerCount = baseDna.layers.filter((l) => l.status === 'complete').length;
+  baseDna.totalMs = baseDna.layers.reduce((s, l) => s + l.durationMs, 0);
+
+  const extended: ExtendedDocumentDNA = { ...baseDna, ownership, deviceNetwork };
+
+  // Persist DNA record
+  const record: DnaRecord = {
+    dnaId: baseDna.dnaId,
+    signature: baseDna.signature,
+    userId: ctx.userId,
+    fileName,
+    fileType: mimeType,
+    sizeBytes,
+    sha256: baseDna.sha256,
+    pHash: baseDna.pHash,
+    aHash: baseDna.aHash,
+    dHash: baseDna.dHash,
+    edgeSignature: baseDna.edgeSignature,
+    hmacSeal: baseDna.hmacSeal,
+    ownership,
+    deviceNetwork,
+    custody: [],
+    createdAt: baseDna.composedAt,
+    colorHistogram: advColorHistogram,
+    blockDct: advBlockDct,
+    edgeDensity: advEdgeDensity,
+    dominantPalette: advDominantPalette,
+  };
+  saveDnaRecord(record);
+
+  // L9 — Initial custody event
+  try {
+    await appendCustodyEvent(baseDna.dnaId, 'encrypted', ctx.userId);
+  } catch { /* custody logging failed */ }
+
+  return extended;
 }
 
 // ─── Public: Verify engine (weighted per-layer scoring) ─────────────────────
