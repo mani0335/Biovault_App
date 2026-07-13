@@ -3836,6 +3836,43 @@ function SharePage({
       } catch (err) {
       }
 
+      // ── Per-subscriber watermark variant ────────────────────────────────────
+      // Re-embed the DNA watermark with the unique shareId as the assetUuid.
+      // Every shared copy now carries a different fingerprint.  If a recipient
+      // leaks the file, extracting the watermark yields the shareId which maps
+      // directly to the share_configs record — subscriber attribution without
+      // needing a tracked delivery link.
+      let subscriberVariantImage: string | undefined;
+      if (previewDataUrl && previewDataUrl.startsWith('data:image')) {
+        try {
+          const { embedPersistentDna } = await import('@/lib/dna/persistentDna');
+          const shareVariantPayload = {
+            ownerId: userId || 'unknown',
+            pinitId: userId || 'unknown',
+            dnaId: shareId,
+            assetUuid: shareId,
+            timestamp: new Date().toISOString(),
+            signature: `SHARE_VARIANT:${shareId}`,
+            ownerName: selectedShareImage.metadata?.ownerName || selectedShareImage.metadata?.ownerId || 'PINIT Owner',
+            gpsLat: null,
+            gpsLng: null,
+            address: null,
+            city: null,
+            state: null,
+            country: null,
+            deviceModel: null,
+            deviceManufacturer: null,
+            publicIp: null,
+          };
+          subscriberVariantImage = await embedPersistentDna(previewDataUrl, shareVariantPayload);
+        } catch {
+          subscriberVariantImage = previewDataUrl;
+        }
+      }
+      // Set resolvedFilePreview so ShareOptionsPanel can share the actual file
+      // (not just a URL) via WhatsApp / Telegram / native share intent.
+      setResolvedFilePreview(subscriberVariantImage ?? (previewDataUrl ?? undefined));
+
       // Save to share_configs using only confirmed existing columns
       const insertPayload: Record<string, unknown> = {
         share_id: shareId,
@@ -4374,6 +4411,63 @@ function SharePage({
               </div>
             </div>
           )}
+
+          {/* DMCA NOTICE GENERATOR */}
+          <div className="bg-gradient-to-br from-red-950/40 to-purple-900/30 border border-red-500/30 backdrop-blur-xl rounded-2xl p-6 shadow-xl">
+            <h2 className="text-lg font-bold text-white mb-1">⚖️ DMCA Takedown Notice</h2>
+            <p className="text-xs text-red-300/70 mb-4">
+              If this content was leaked or re-uploaded without permission, generate a pre-filled
+              DMCA notice with DNA forensic evidence attached.
+            </p>
+            <div className="space-y-3">
+              <input
+                id="dmca-infringing-url"
+                type="url"
+                placeholder="Paste infringing URL (optional)"
+                className="w-full bg-slate-800/60 border border-red-500/30 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+              />
+              <Button
+                onClick={async () => {
+                  try {
+                    const infringingUrl = (document.getElementById('dmca-infringing-url') as HTMLInputElement)?.value || '';
+                    const { generateDmcaNotice } = await import('@/lib/dmca/dmcaGenerator');
+                    const pdfDataUri = await generateDmcaNotice({
+                      ownerName: selectedShareImage?.metadata?.ownerName || userId || 'PINIT Owner',
+                      contentTitle: selectedShareImage?.name || 'Protected Content',
+                      dnaId: selectedShareImage?.metadata?.dnaId || generatedShareLink.split('/').pop() || 'N/A',
+                      sha256: undefined,
+                      shareId: generatedShareLink.split('/share/')[1] || undefined,
+                      infringingUrl: infringingUrl || undefined,
+                      createdAt: selectedShareImage?.createdAt || new Date().toLocaleString(),
+                      shareLink: generatedShareLink,
+                    });
+                    const { Capacitor } = await import('@capacitor/core');
+                    const fileName = `DMCA-Notice-${Date.now()}.pdf`;
+                    if (Capacitor.isNativePlatform()) {
+                      // Android/iOS: save via Capacitor Filesystem then open share sheet
+                      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+                      const { Share } = await import('@capacitor/share');
+                      const base64 = pdfDataUri.split(',')[1];
+                      await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache, recursive: true });
+                      const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
+                      await Share.share({ title: 'DMCA Takedown Notice', url: uri, dialogTitle: 'Save or Send DMCA Notice' });
+                    } else {
+                      // Web: standard anchor download
+                      const a = document.createElement('a');
+                      a.href = pdfDataUri;
+                      a.download = fileName;
+                      a.click();
+                    }
+                  } catch (err) {
+                    alert('❌ Could not generate DMCA notice: ' + (err as any)?.message);
+                  }
+                }}
+                className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-800 hover:to-rose-700 font-semibold shadow-lg text-white"
+              >
+                📄 Generate & Download DMCA Notice
+              </Button>
+            </div>
+          </div>
 
           {/* ACTION BUTTONS */}
           <div className="flex gap-3">
