@@ -10,6 +10,10 @@ export interface DmcaNoticeData {
   infringingUrl?: string;
   createdAt: string;
   shareLink: string;
+  /** 'native-upload' = no tracked link, no per-session watermark → Scenario 2 */
+  distributionMode?: 'tracked-link' | 'native-upload';
+  /** pHash / hash match confidence 0–100, shown in evidence section */
+  matchConfidence?: number;
 }
 
 export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> {
@@ -118,6 +122,29 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
       `uniquely identifies which distribution copy was leaked. This is supported by the ` +
       `PINIT smart-link delivery log.`,
       10, [60, 0, 120]
+    );
+  }
+  if (data.distributionMode === 'native-upload') {
+    body(
+      `• Distribution Method: Native file upload to a third-party platform. No PINIT Vault ` +
+      `tracked share link was issued for this distribution path.`,
+      10, [60, 0, 120]
+    );
+    body(
+      `• Attribution Status: No per-session subscriber watermark was applied. The embedded ` +
+      `DNA proves asset ownership and confirms the file originated from the rights holder\'s ` +
+      `PINIT Vault registration. Individual subscriber-level leak attribution is not available.`,
+      10, [60, 0, 120]
+    );
+    if (data.matchConfidence !== undefined) {
+      const level = data.matchConfidence >= 95 ? 'EXACT HASH MATCH' : data.matchConfidence >= 80 ? 'HIGH CONFIDENCE — perceptual match' : 'MODERATE — perceptual similarity';
+      body(`• Match Confidence: ${data.matchConfidence}% (${level})`, 10, [60, 0, 120]);
+    }
+    body(
+      `• Legal Note: Absence of per-session attribution does not diminish the ownership proof. ` +
+      `The embedded PINIT DNA watermark and SHA-256 hash satisfy 17 U.S.C. § 512(c)(3) DMCA ` +
+      `takedown requirements independently of session-level attribution.`,
+      10, [120, 60, 0]
     );
   }
   space();

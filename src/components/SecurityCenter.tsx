@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield,
@@ -17,12 +17,23 @@ import {
   ArrowLeft,
   RefreshCw,
   FileText,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { generateDmcaNotice } from '@/lib/dmca/dmcaGenerator';
+import { runForensicScan } from '@/lib/dna/forensicIntelligence';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
+
+const RECOVERY_SOURCE_LABELS: Record<string, string> = {
+  'exact-hash':     'SHA-256 Exact Hash Match',
+  'persistent-dna': 'Pixel DNA Watermark (Every Tile)',
+  'perceptual-hash':'Visual Perceptual Fingerprint (pHash)',
+  'watermark':      'Legacy LSB Watermark',
+  'none':           'No Match Found',
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -187,6 +198,19 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
   const [dmcaUrl, setDmcaUrl] = useState('');
   const [generatingDmca, setGeneratingDmca] = useState<string | null>(null);
 
+  // Scenario 2 — scan a suspected stolen file
+  const [scenario2File, setScenario2File] = useState<File | null>(null);
+  const [scenario2Scanning, setScenario2Scanning] = useState(false);
+  const [scenario2Result, setScenario2Result] = useState<{
+    verdict: string;
+    confidence: number;
+    source: string;
+    dnaId?: string;
+    sha256?: string;
+  } | null>(null);
+  const [scenario2Error, setScenario2Error] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // ── Data fetch ──────────────────────────────────────────────────────────────
 
   const fetchShares = useCallback(async () => {
@@ -284,6 +308,86 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
         const a = document.createElement('a');
         a.href = dataUri;
         a.download = `DMCA_${share.image_name.replace(/\s/g, '_')}_${Date.now()}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch {
+      // ignore generation errors
+    } finally {
+      setGeneratingDmca(null);
+    }
+  };
+
+  const handleScenario2Scan = async () => {
+    if (!scenario2File) return;
+    setScenario2Scanning(true);
+    setScenario2Result(null);
+    setScenario2Error(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(scenario2File);
+      });
+
+      const report = await runForensicScan(
+        dataUrl,
+        scenario2File.name,
+        scenario2File.type,
+        scenario2File.size,
+      );
+
+      const sourceConfidence: Record<string, number> = {
+        'exact-hash': 100,
+        'persistent-dna': 97,
+        'watermark': 85,
+        'perceptual-hash': report.visualSimilarity ?? 70,
+        'none': 0,
+      };
+      const confidence = sourceConfidence[report.ownerRecoverySource ?? 'none'] ?? 0;
+
+      setScenario2Result({
+        verdict: report.verdict,
+        confidence,
+        source: report.ownerRecoverySource ?? 'none',
+        dnaId: report.dnaId,
+        sha256: report.sha256 ?? undefined,
+      });
+    } catch (err: unknown) {
+      setScenario2Error(err instanceof Error ? err.message : 'Scan failed — try a different image');
+    } finally {
+      setScenario2Scanning(false);
+    }
+  };
+
+  const handleScenario2Evidence = async () => {
+    if (!scenario2Result) return;
+    setGeneratingDmca('scenario2');
+    try {
+      const dataUri = await generateDmcaNotice({
+        ownerName: 'Rights Holder',
+        contentTitle: scenario2File?.name ?? 'Unknown Asset',
+        dnaId: scenario2Result.dnaId ?? 'N/A',
+        sha256: scenario2Result.sha256,
+        createdAt: new Date().toLocaleDateString(),
+        shareLink: 'N/A — Native Platform Upload',
+        distributionMode: 'native-upload',
+        matchConfidence: scenario2Result.confidence,
+      });
+
+      if (Capacitor.isNativePlatform()) {
+        const base64 = dataUri.split(',')[1];
+        const { Filesystem, Directory } = await import('@capacitor/filesystem');
+        const fileName = `DNA_Evidence_Package_${Date.now()}.pdf`;
+        await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache });
+        const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
+        await Share.share({ title: 'DNA Evidence Package', url: uri, dialogTitle: 'Share Evidence Package' });
+      } else {
+        const a = document.createElement('a');
+        a.href = dataUri;
+        a.download = `DNA_Evidence_Package_${Date.now()}.pdf`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -567,6 +671,130 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
 
     return (
       <motion.div key="takedown" variants={tabVariants} initial="hidden" animate="visible" exit="exit" className="space-y-4">
+
+        {/* Scenario 2 — Scan Stolen File */}
+        <div className="bg-slate-800 border border-blue-700/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Upload className="w-4 h-4 text-blue-400" />
+            <p className="text-white font-semibold text-sm">Scan Stolen File</p>
+            <span className="text-[10px] bg-blue-900/40 text-blue-300 border border-blue-700/40 px-2 py-0.5 rounded-full font-bold">SCENARIO 2</span>
+          </div>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            Found content on a piracy site that was uploaded natively (no share link)? Upload it here to compare against your DNA-registered assets. Match confidence shown — no subscriber attribution for native-upload paths.
+          </p>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              if (f) {
+                setScenario2File(f);
+                setScenario2Result(null);
+                setScenario2Error(null);
+              }
+              e.target.value = '';
+            }}
+          />
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full bg-slate-700/60 border border-slate-600 border-dashed rounded-lg px-3 py-3 text-slate-300 text-sm flex items-center justify-center gap-2 hover:bg-slate-700 transition-colors"
+          >
+            <Upload className="w-4 h-4 text-blue-400 shrink-0" />
+            <span className="truncate">{scenario2File ? scenario2File.name : 'Choose suspected stolen image…'}</span>
+          </button>
+
+          {scenario2File && !scenario2Result && (
+            <Button
+              size="sm"
+              disabled={scenario2Scanning}
+              onClick={handleScenario2Scan}
+              className="w-full bg-blue-700 hover:bg-blue-600 text-white text-xs"
+            >
+              {scenario2Scanning ? (
+                <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Scanning 10-layer DNA…</>
+              ) : (
+                <><Search className="w-3 h-3 mr-1.5" />Run Ownership Scan</>
+              )}
+            </Button>
+          )}
+
+          {scenario2Error && (
+            <p className="text-red-400 text-xs flex items-center gap-1">
+              <XCircle className="w-3 h-3 shrink-0" />{scenario2Error}
+            </p>
+          )}
+
+          {scenario2Result && (
+            <div className={`rounded-lg p-3 border space-y-2 ${
+              scenario2Result.confidence >= 80
+                ? 'bg-green-900/20 border-green-600/40'
+                : scenario2Result.confidence >= 50
+                ? 'bg-amber-900/20 border-amber-600/40'
+                : 'bg-slate-900/60 border-slate-600/40'
+            }`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {scenario2Result.confidence >= 80 ? (
+                    <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                  )}
+                  <span className={`font-bold text-sm ${
+                    scenario2Result.confidence >= 95 ? 'text-green-400' :
+                    scenario2Result.confidence >= 80 ? 'text-green-300' :
+                    scenario2Result.confidence >= 50 ? 'text-amber-400' : 'text-slate-400'
+                  }`}>
+                    {scenario2Result.confidence >= 95 ? 'EXACT MATCH' :
+                     scenario2Result.confidence >= 80 ? 'HIGH CONFIDENCE' :
+                     scenario2Result.confidence >= 50 ? 'PARTIAL MATCH' : 'NO MATCH'}
+                  </span>
+                </div>
+                <span className="text-2xl font-black text-white leading-none">{scenario2Result.confidence}%</span>
+              </div>
+
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all duration-500 ${
+                    scenario2Result.confidence >= 80 ? 'bg-green-500' :
+                    scenario2Result.confidence >= 50 ? 'bg-amber-500' : 'bg-slate-500'
+                  }`}
+                  style={{ width: `${scenario2Result.confidence}%` }}
+                />
+              </div>
+
+              <div className="space-y-0.5 text-xs text-slate-400 pt-0.5">
+                <p>Detection layer: {RECOVERY_SOURCE_LABELS[scenario2Result.source] ?? scenario2Result.source}</p>
+                <p className="text-amber-400 font-medium">Attribution: None — native upload path (Scenario 2)</p>
+              </div>
+
+              {scenario2Result.confidence >= 50 && (
+                <Button
+                  size="sm"
+                  disabled={generatingDmca === 'scenario2'}
+                  onClick={handleScenario2Evidence}
+                  className="w-full bg-purple-700 hover:bg-purple-600 text-white text-xs mt-1"
+                >
+                  <FileText className="w-3 h-3 mr-1.5" />
+                  {generatingDmca === 'scenario2' ? 'Generating…' : 'Generate Evidence Package PDF'}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {scenario2Result && (
+            <button
+              onClick={() => { setScenario2File(null); setScenario2Result(null); setScenario2Error(null); }}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              ← Scan another file
+            </button>
+          )}
+        </div>
+
         {/* Auto DMCA generator */}
         <div className="bg-slate-800 border border-purple-700/40 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
