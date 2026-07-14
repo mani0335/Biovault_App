@@ -10,8 +10,10 @@ export interface DmcaNoticeData {
   infringingUrl?: string;
   createdAt: string;
   shareLink: string;
-  /** 'native-upload' = no tracked link → Scenario 2; 'screen-recorded' = re-encoded via screen capture → Scenario 3 */
-  distributionMode?: 'tracked-link' | 'native-upload' | 'screen-recorded';
+  /** distribution path: Scenario 2 = native-upload, Scenario 3 = screen-recorded, Scenario 4 = private-group */
+  distributionMode?: 'tracked-link' | 'native-upload' | 'screen-recorded' | 'private-group';
+  /** optional: name/alias of person who reported the piracy (Scenario 4 crowd-sourced) */
+  reportedBy?: string;
   /** pHash / hash match confidence 0–100, shown in evidence section */
   matchConfidence?: number;
 }
@@ -150,6 +152,37 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
       `• Additional Legal Basis: Screen-recording paywalled content may also constitute ` +
       `circumvention of technical protection measures under 17 U.S.C. § 1201 ` +
       `(DMCA Anti-Circumvention), in addition to infringement under § 512(c)(3).`,
+      10, [120, 60, 0]
+    );
+  }
+  if (data.distributionMode === 'private-group') {
+    body(
+      `• Distribution Path: Content found in a private closed group (Telegram channel or ` +
+      `Discord server). No public URL exists — standard crawler-based detection cannot ` +
+      `reach this surface. Detection was triggered by a crowd-sourced report.`,
+      10, [60, 0, 120]
+    );
+    if (data.reportedBy) {
+      body(`• Reported By: ${data.reportedBy} (member of the private group who flagged the infringing content)`, 10, [60, 0, 120]);
+    }
+    body(
+      `• Verification: The reported content was run through the full PINIT DNA match ` +
+      `cascade (SHA-256 → perceptual hash → pixel watermark) and confirmed as a match ` +
+      `before this notice was generated.`,
+      10, [60, 0, 120]
+    );
+    if (data.matchConfidence !== undefined) {
+      body(`• Match Confidence: ${data.matchConfidence}%`, 10, [60, 0, 120]);
+    }
+    body(
+      `• Note on Timeline: Telegram and Discord use non-standardized reporting processes. ` +
+      `Resolution time is longer than for DMCA-compliant hosts. This notice documents ` +
+      `the infringing content for escalation to platform trust-and-safety teams.`,
+      10, [120, 60, 0]
+    );
+    body(
+      `• Legal Basis: 17 U.S.C. § 512(c)(3) DMCA Safe Harbor takedown. For Telegram: ` +
+      `abuse@telegram.org. For Discord: dis.gd/report.`,
       10, [120, 60, 0]
     );
   }

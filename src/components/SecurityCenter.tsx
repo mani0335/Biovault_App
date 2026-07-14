@@ -198,7 +198,9 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
   const [dmcaUrl, setDmcaUrl] = useState('');
   const [generatingDmca, setGeneratingDmca] = useState<string | null>(null);
 
-  // Scenario 2 — scan a suspected stolen file
+  // Scan flow — used for Scenario 2, 3 and 4
+  const [reportMode, setReportMode] = useState<'platform-upload' | 'private-group'>('platform-upload');
+  const [reportedBy, setReportedBy] = useState('');
   const [scenario2File, setScenario2File] = useState<File | null>(null);
   const [scenario2Scanning, setScenario2Scanning] = useState(false);
   const [scenario2Result, setScenario2Result] = useState<{
@@ -209,6 +211,8 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     sha256?: string;
     visualSimilarity?: number | null;
     isScenario3?: boolean;
+    ownerName?: string;
+    registeredAt?: string;
   } | null>(null);
   const [scenario2Error, setScenario2Error] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -364,6 +368,8 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
         sha256: report.sha256 ?? undefined,
         visualSimilarity: report.visualSimilarity,
         isScenario3,
+        ownerName: report.originalOwner?.ownerName ?? report.originalOwner?.pinitOwnerId ?? undefined,
+        registeredAt: report.originalOwner?.encryptionTimestamp ?? undefined,
       });
     } catch (err: unknown) {
       setScenario2Error(err instanceof Error ? err.message : 'Scan failed — try a different image');
@@ -376,16 +382,30 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     if (!scenario2Result) return;
     setGeneratingDmca('scenario2');
     try {
-      const distributionMode = scenario2Result.isScenario3 ? 'screen-recorded' : 'native-upload';
+      const distributionMode =
+        reportMode === 'private-group'
+          ? 'private-group'
+          : scenario2Result.isScenario3
+          ? 'screen-recorded'
+          : 'native-upload';
+      const shareLink =
+        distributionMode === 'screen-recorded'
+          ? 'N/A — Screen-Recorded Distribution'
+          : distributionMode === 'private-group'
+          ? 'N/A — Private Group (Telegram/Discord)'
+          : 'N/A — Native Platform Upload';
       const dataUri = await generateDmcaNotice({
-        ownerName: 'Rights Holder',
+        ownerName: scenario2Result.ownerName ?? 'Rights Holder',
         contentTitle: scenario2File?.name ?? 'Unknown Asset',
         dnaId: scenario2Result.dnaId ?? 'N/A',
         sha256: scenario2Result.sha256,
-        createdAt: new Date().toLocaleDateString(),
-        shareLink: distributionMode === 'screen-recorded' ? 'N/A — Screen-Recorded Distribution' : 'N/A — Native Platform Upload',
+        createdAt: scenario2Result.registeredAt
+          ? new Date(scenario2Result.registeredAt).toLocaleDateString()
+          : new Date().toLocaleDateString(),
+        shareLink,
         distributionMode,
         matchConfidence: scenario2Result.confidence,
+        reportedBy: reportMode === 'private-group' && reportedBy ? reportedBy : undefined,
       });
 
       if (Capacitor.isNativePlatform()) {
@@ -669,8 +689,14 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
       {
         emoji: '✈️',
         name: 'Telegram',
-        desc: 'Submit a DMCA takedown to Telegram',
+        desc: 'DMCA / abuse report — abuse@telegram.org (Scenario 4: private channels)',
         url: 'https://telegram.org/dmca',
+      },
+      {
+        emoji: '🎮',
+        name: 'Discord',
+        desc: 'Report copyright infringement — dis.gd/report (Scenario 4: private servers)',
+        url: 'https://discord.com/safety/copyright',
       },
       {
         emoji: '🔍',
@@ -683,16 +709,56 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     return (
       <motion.div key="takedown" variants={tabVariants} initial="hidden" animate="visible" exit="exit" className="space-y-4">
 
-        {/* Scenario 2 — Scan Stolen File */}
+        {/* Scan Stolen File — Scenarios 2, 3 & 4 */}
         <div className="bg-slate-800 border border-blue-700/40 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Upload className="w-4 h-4 text-blue-400" />
             <p className="text-white font-semibold text-sm">Scan Stolen File</p>
-            <span className="text-[10px] bg-blue-900/40 text-blue-300 border border-blue-700/40 px-2 py-0.5 rounded-full font-bold">SCENARIO 2</span>
+            <span className="text-[10px] bg-blue-900/40 text-blue-300 border border-blue-700/40 px-2 py-0.5 rounded-full font-bold">
+              {reportMode === 'private-group' ? 'SCENARIO 4' : 'SCENARIO 2 / 3'}
+            </span>
           </div>
+
+          {/* Mode toggle */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => { setReportMode('platform-upload'); setScenario2Result(null); setScenario2Error(null); }}
+              className={`text-xs px-2 py-1.5 rounded-lg border transition-colors ${
+                reportMode === 'platform-upload'
+                  ? 'bg-blue-700 border-blue-600 text-white font-semibold'
+                  : 'bg-slate-700/60 border-slate-600 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              Public Platform
+            </button>
+            <button
+              onClick={() => { setReportMode('private-group'); setScenario2Result(null); setScenario2Error(null); }}
+              className={`text-xs px-2 py-1.5 rounded-lg border transition-colors ${
+                reportMode === 'private-group'
+                  ? 'bg-purple-700 border-purple-600 text-white font-semibold'
+                  : 'bg-slate-700/60 border-slate-600 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              Private Group (Telegram/Discord)
+            </button>
+          </div>
+
           <p className="text-slate-400 text-xs leading-relaxed">
-            Found content on a piracy site that was uploaded natively (no share link)? Upload it here to compare against your DNA-registered assets. Match confidence shown — no subscriber attribution for native-upload paths.
+            {reportMode === 'private-group'
+              ? 'Content leaked into a closed Telegram channel or Discord server (no public crawl surface). Upload a screenshot from the private group to verify ownership via watermark.'
+              : 'Found content on a public piracy site or social media? Upload it here — our DNA cascade detects ownership even through re-encoding and filters.'
+            }
           </p>
+
+          {reportMode === 'private-group' && (
+            <input
+              type="text"
+              value={reportedBy}
+              onChange={(e) => setReportedBy(e.target.value)}
+              placeholder="Reported by (subscriber name or alias) — optional"
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+            />
+          )}
 
           <input
             ref={fileInputRef}
@@ -779,7 +845,17 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
 
               <div className="space-y-1 text-xs text-slate-400 pt-0.5">
                 <p>Detection layer: {RECOVERY_SOURCE_LABELS[scenario2Result.source] ?? scenario2Result.source}</p>
-                {scenario2Result.isScenario3 ? (
+                {reportMode === 'private-group' ? (
+                  <div className="bg-purple-900/30 border border-purple-600/40 rounded px-2 py-1.5 space-y-0.5">
+                    <p className="text-purple-300 font-bold flex items-center gap-1">
+                      <Shield className="w-3 h-3 shrink-0" />
+                      PRIVATE GROUP LEAK — Scenario 4
+                    </p>
+                    <p className="text-purple-400/80">Verified via in-app watermark scan. No public crawl surface — detection was crowd-sourced.</p>
+                    {reportedBy && <p className="text-slate-400">Reported by: {reportedBy}</p>}
+                    <p className="text-amber-400">Takedown target: Telegram/Discord (slower process — use abuse@ contacts).</p>
+                  </div>
+                ) : scenario2Result.isScenario3 ? (
                   <div className="bg-orange-900/30 border border-orange-600/40 rounded px-2 py-1.5 space-y-0.5">
                     <p className="text-orange-300 font-bold flex items-center gap-1">
                       <Shield className="w-3 h-3 shrink-0" />
@@ -812,7 +888,7 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
 
           {scenario2Result && (
             <button
-              onClick={() => { setScenario2File(null); setScenario2Result(null); setScenario2Error(null); }}
+              onClick={() => { setScenario2File(null); setScenario2Result(null); setScenario2Error(null); setReportedBy(''); }}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
             >
               ← Scan another file
@@ -848,6 +924,18 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
               {generatingDmca === 'bulk' ? 'Generating PDF…' : 'Download DMCA Notice PDF'}
             </Button>
           )}
+        </div>
+
+        {/* Scenario 4 — Private group notice */}
+        <div className="bg-purple-900/20 border border-purple-700/40 rounded-xl p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-purple-400 shrink-0" />
+            <p className="text-purple-300 font-semibold text-sm">Scenario 4 — Private Group Leak</p>
+          </div>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            Telegram channels and Discord servers have no public crawl surface. Automated detection cannot reach them. Use the <span className="text-purple-300 font-medium">Scan Stolen File → Private Group</span> mode above to verify ownership via watermark after a crowd-sourced report, then use the Telegram / Discord links below to file the takedown.
+          </p>
+          <p className="text-amber-400/80 text-xs">Timeline: 3–14 days (non-DMCA-compliant platforms have slower, less standardized processes than public hosts).</p>
         </div>
 
         {/* Platform cards */}
