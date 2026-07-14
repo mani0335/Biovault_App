@@ -207,6 +207,8 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     source: string;
     dnaId?: string;
     sha256?: string;
+    visualSimilarity?: number | null;
+    isScenario3?: boolean;
   } | null>(null);
   const [scenario2Error, setScenario2Error] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -348,12 +350,20 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
       };
       const confidence = sourceConfidence[report.ownerRecoverySource ?? 'none'] ?? 0;
 
+      // Scenario 3 pattern: watermark fired (persistent-dna) but pHash didn't match
+      // (visualSimilarity null or low means the image was re-encoded/filtered)
+      const isScenario3 =
+        report.ownerRecoverySource === 'persistent-dna' &&
+        (report.visualSimilarity === null || (report.visualSimilarity !== null && report.visualSimilarity < 55));
+
       setScenario2Result({
         verdict: report.verdict,
         confidence,
         source: report.ownerRecoverySource ?? 'none',
         dnaId: report.dnaId,
         sha256: report.sha256 ?? undefined,
+        visualSimilarity: report.visualSimilarity,
+        isScenario3,
       });
     } catch (err: unknown) {
       setScenario2Error(err instanceof Error ? err.message : 'Scan failed — try a different image');
@@ -366,14 +376,15 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     if (!scenario2Result) return;
     setGeneratingDmca('scenario2');
     try {
+      const distributionMode = scenario2Result.isScenario3 ? 'screen-recorded' : 'native-upload';
       const dataUri = await generateDmcaNotice({
         ownerName: 'Rights Holder',
         contentTitle: scenario2File?.name ?? 'Unknown Asset',
         dnaId: scenario2Result.dnaId ?? 'N/A',
         sha256: scenario2Result.sha256,
         createdAt: new Date().toLocaleDateString(),
-        shareLink: 'N/A — Native Platform Upload',
-        distributionMode: 'native-upload',
+        shareLink: distributionMode === 'screen-recorded' ? 'N/A — Screen-Recorded Distribution' : 'N/A — Native Platform Upload',
+        distributionMode,
         matchConfidence: scenario2Result.confidence,
       });
 
@@ -766,9 +777,23 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
                 />
               </div>
 
-              <div className="space-y-0.5 text-xs text-slate-400 pt-0.5">
+              <div className="space-y-1 text-xs text-slate-400 pt-0.5">
                 <p>Detection layer: {RECOVERY_SOURCE_LABELS[scenario2Result.source] ?? scenario2Result.source}</p>
-                <p className="text-amber-400 font-medium">Attribution: None — native upload path (Scenario 2)</p>
+                {scenario2Result.isScenario3 ? (
+                  <div className="bg-orange-900/30 border border-orange-600/40 rounded px-2 py-1.5 space-y-0.5">
+                    <p className="text-orange-300 font-bold flex items-center gap-1">
+                      <Shield className="w-3 h-3 shrink-0" />
+                      SCREEN-RECORD DETECTION — Scenario 3
+                    </p>
+                    <p className="text-orange-400/80">Watermark survived re-encoding. pHash did NOT match (expected — filters/compression destroyed hash). Probabilistic match.</p>
+                    <p className="text-amber-400">Attribution: None — content was screen-recorded from platform player.</p>
+                  </div>
+                ) : (
+                  <p className="text-amber-400 font-medium">Attribution: None — native upload path (Scenario 2)</p>
+                )}
+                {scenario2Result.visualSimilarity !== null && scenario2Result.visualSimilarity !== undefined && (
+                  <p className="text-slate-500">Visual similarity to original: {scenario2Result.visualSimilarity}%</p>
+                )}
               </div>
 
               {scenario2Result.confidence >= 50 && (

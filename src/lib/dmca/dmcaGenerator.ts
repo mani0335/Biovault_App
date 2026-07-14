@@ -10,8 +10,8 @@ export interface DmcaNoticeData {
   infringingUrl?: string;
   createdAt: string;
   shareLink: string;
-  /** 'native-upload' = no tracked link, no per-session watermark → Scenario 2 */
-  distributionMode?: 'tracked-link' | 'native-upload';
+  /** 'native-upload' = no tracked link → Scenario 2; 'screen-recorded' = re-encoded via screen capture → Scenario 3 */
+  distributionMode?: 'tracked-link' | 'native-upload' | 'screen-recorded';
   /** pHash / hash match confidence 0–100, shown in evidence section */
   matchConfidence?: number;
 }
@@ -122,6 +122,35 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
       `uniquely identifies which distribution copy was leaked. This is supported by the ` +
       `PINIT smart-link delivery log.`,
       10, [60, 0, 120]
+    );
+  }
+  if (data.distributionMode === 'screen-recorded') {
+    body(
+      `• Distribution Path: Screen-recording of paywalled content, re-encoded, and reposted ` +
+      `to a social media platform with filter/crop applied.`,
+      10, [60, 0, 120]
+    );
+    body(
+      `• Detection Method: Amplitude-14 persistent pixel watermark survived double-pass ` +
+      `re-encoding (screen capture + platform compression). SHA-256 exact-hash and ` +
+      `perceptual hash did NOT match (expected after heavy re-encoding). Watermark ` +
+      `extraction alone confirmed ownership identity.`,
+      10, [60, 0, 120]
+    );
+    if (data.matchConfidence !== undefined) {
+      body(`• Match Confidence: ${data.matchConfidence}% (probabilistic — watermark decode layer; probabilistic matches use a higher false-positive tolerance check)`, 10, [60, 0, 120]);
+    }
+    body(
+      `• Attribution: No per-session subscriber watermark is available — content was ` +
+      `screen-recorded directly from the platform player, bypassing the PINIT Vault ` +
+      `delivery path. Ownership proof is independent of subscriber attribution.`,
+      10, [60, 0, 120]
+    );
+    body(
+      `• Additional Legal Basis: Screen-recording paywalled content may also constitute ` +
+      `circumvention of technical protection measures under 17 U.S.C. § 1201 ` +
+      `(DMCA Anti-Circumvention), in addition to infringement under § 512(c)(3).`,
+      10, [120, 60, 0]
     );
   }
   if (data.distributionMode === 'native-upload') {
