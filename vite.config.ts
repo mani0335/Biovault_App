@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      external: ['@capacitor/push-notifications'],
+    },
   },
   server: {
     host: "::",
