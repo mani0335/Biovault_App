@@ -165,6 +165,7 @@ type PageType = "home" | "vault" | "portfolio" | "share" | "identity" | "encrypt
 
 // ============= SHARE ACCESS PAGE =============
 function ShareAccessPage() {
+  const navigate = useNavigate();
   const [shareData, setShareData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -311,7 +312,7 @@ function ShareAccessPage() {
             <h2 className="text-2xl font-bold text-red-400 mb-2">Share Link Error</h2>
             <p className="text-gray-300 mb-6">{error}</p>
             <button
-              onClick={() => window.location.href = '/'}
+              onClick={() => navigate('/')}
               className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition"
             >
               Go to PINIT Vault
@@ -409,7 +410,7 @@ function ShareAccessPage() {
             </button>
             
             <button
-              onClick={() => window.location.href = '/'}
+              onClick={() => navigate('/')}
               className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-lg transition font-semibold"
             >
               Open PINIT Vault
@@ -668,7 +669,7 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
   const [shareConfigs, setShareConfigs] = useState<ShareConfig[]>([]);
   const [shareHistory, setShareHistory] = useState<any[]>([]);
   const [selectedShareImage, setSelectedShareImage] = useState<VaultDocument | null>(null);
-  const [resolvedFilePreview, setResolvedFilePreview] = useState<string | undefined>(undefined);
+  // resolvedFilePreview state lives inside SharePage where it is used
   const [shareExpiryDate, setShareExpiryDate] = useState<string>("");
   const [shareExpiryTime, setShareExpiryTime] = useState<string>("23:59");
   const [shareDownloadLimit, setShareDownloadLimit] = useState<number | null>(null);
@@ -681,6 +682,8 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
   // Quick Action refs for camera and file upload
   const quickActionCameraRef = useRef<HTMLInputElement>(null);
   const quickActionFileRef = useRef<HTMLInputElement>(null);
+  // Retake ref — uses file input (not CapacitorCamera Activity) to avoid WebView kill on Android
+  const retakeCameraRef = useRef<HTMLInputElement>(null);
 
   // Handler for quick action image selection (works like Analyze button)
   const handleQuickActionImageSelected = (imageData: string) => {
@@ -693,49 +696,7 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
     setCurrentPage("verify-proof");
   };
 
-  // Resolve encryptedImage for sharing asynchronously (localStorage is synchronous
-  // and often overflows for large PNGs; appStorage survives where localStorage fails).
-  useEffect(() => {
-    if (!selectedShareImage || !userId) {
-      setResolvedFilePreview(undefined);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      // 1. In-memory object
-      const img = (selectedShareImage as any)?.encryptedImage;
-      if (img && img.length > 5000) {
-        if (!cancelled) setResolvedFilePreview(img);
-        return;
-      }
-      // 2. localStorage (synchronous, may fail for large images)
-      try {
-        const stored = localStorage.getItem(`pinit_vault_documents_${userId}`);
-        if (stored) {
-          const docs = JSON.parse(stored) as VaultDocument[];
-          const local = docs.find((d) => d.id === selectedShareImage.id || d.name === selectedShareImage.name);
-          if (local?.encryptedImage && local.encryptedImage.length > 5000) {
-            if (!cancelled) setResolvedFilePreview(local.encryptedImage);
-            return;
-          }
-        }
-      } catch { /* ignore */ }
-      // 3. Capacitor appStorage (async, higher storage limit, most reliable)
-      try {
-        const stored = await appStorage.getItem(`pinit_vault_documents_${userId}`);
-        if (stored) {
-          const docs = JSON.parse(stored) as VaultDocument[];
-          const local = docs.find((d) => d.id === selectedShareImage.id || d.name === selectedShareImage.name);
-          if (local?.encryptedImage && local.encryptedImage.length > 5000) {
-            if (!cancelled) setResolvedFilePreview(local.encryptedImage);
-            return;
-          }
-        }
-      } catch { /* ignore */ }
-      if (!cancelled) setResolvedFilePreview(undefined);
-    })();
-    return () => { cancelled = true; };
-  }, [selectedShareImage, userId]);
+  // resolvedFilePreview effect moved into SharePage where state now lives
 
   // Load and sync vault documents when userId is available
   useEffect(() => {
@@ -1070,11 +1031,10 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
       {/* Content Area */}
       <AnimatePresence mode="wait">
         {currentPage === "home" && <HomePage key="home" userName={userName} documentCount={vaultDocuments.length} activeSharesCount={shareConfigs.length} onEncryptClick={async () => {
-          // Use getUserMedia in-app camera instead of CapacitorCamera.getPhoto().
-          // CapacitorCamera opens a separate Android Activity which can kill the WebView
-          // and wipe the auth session (same issue fixed for PINIT Live and LiveScanner).
-          // We navigate to generate-dna which has a full in-app getUserMedia camera flow.
-          setCurrentPage("generate-dna");
+          // Trigger the hidden <input type="file" capture="environment"> which opens the
+          // device camera within the WebView file-picker flow — avoids the CapacitorCamera
+          // Activity that can wipe auth session, while still routing to encrypt-preview.
+          quickActionCameraRef.current?.click();
         }} setVerifyProofImage={setVerifyProofImage} setCurrentPage={setCurrentPage} quickActionCameraRef={quickActionCameraRef} quickActionFileRef={quickActionFileRef} onQuickActionImageSelected={handleQuickActionImageSelected} onVerifyProofImageSelected={handleVerifyProofImageSelected} navigate={navigate} />}
         {currentPage === "vault" && <VaultPage key="vault" documents={vaultDocuments} userId={userId} userName={userName} selectedShareImage={selectedShareImage} setSelectedShareImage={setSelectedShareImage} setCurrentPage={setCurrentPage} setVerifyProofImage={setVerifyProofImage} onStartShare={() => {
           // Reset share flow so the user always starts fresh on the configure step
@@ -1271,12 +1231,6 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
             key="forensic-scan"
             scannedImage={verifyProofImage}
             fileName={verifyProofFileName}
-            vaultDocHints={vaultDocuments.map((d) => ({
-              pHash: d.pHash ?? (d.metadata as any)?.pHash ?? null,
-              dnaId: d.metadata?.dnaId ?? null,
-              ownerId: d.metadata?.ownerId ?? null,
-              ownerName: d.metadata?.ownerName ?? null,
-            }))}
             onBack={() => {
               setVerifyProofImage(null);
               setVerifyProofAnalysis(null);
@@ -1290,24 +1244,8 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
             image={capturedImage}
             userId={userId || "unknown"}
             userName={userName}
-            onRetake={async () => {
-              try {
-                const image = await CapacitorCamera.getPhoto({
-                  quality: 80,
-                  allowEditing: false,
-                  source: CameraSource.Camera,
-                  resultType: CameraResultType.Base64,
-                  width: 1024,
-                  height: 1024,
-                  correctOrientation: true,
-                });
-                if (image?.base64String) {
-                  setCapturedImage("data:image/jpeg;base64," + image.base64String);
-                }
-              } catch (error) {
-                console.error("❌ Camera error:", error);
-                alert("Failed to capture image. Please try again.");
-              }
+            onRetake={() => {
+              retakeCameraRef.current?.click();
             }}
             onSaveToVault={async (encryptedPackage) => {
               setIsEncrypting(true);
@@ -1407,6 +1345,24 @@ export function PINITVaultDashboard({ userId: propsUserId, isRestricted }: PINIT
           />
         )}
       </AnimatePresence>
+
+      {/* Hidden retake camera input — file-picker approach avoids native Camera Activity killing the WebView */}
+      <input
+        ref={retakeCameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => setCapturedImage(ev.target?.result as string);
+            reader.readAsDataURL(file);
+          }
+          e.target.value = '';
+        }}
+      />
 
       {/* Bottom Navigation — same component used app-wide for consistent design */}
       <BottomNav />
@@ -3305,7 +3261,7 @@ function EncryptPreviewPage({
           assetUuid,
           timestamp: encTimestamp,
           signature: dnaId,
-          ownerName: userName || localStorage.getItem('biovault_userName') || undefined,
+          ownerName: userName || localStorage.getItem('biovault_userName') || userId || undefined,
           gpsLat: devDna?.gpsLat ?? null,
           gpsLng: devDna?.gpsLng ?? null,
           address: devDna?.address ?? null,
@@ -3314,6 +3270,7 @@ function EncryptPreviewPage({
           country: devDna?.country ?? null,
           deviceModel: devDna?.model ?? null,
           deviceManufacturer: devDna?.manufacturer ?? null,
+          deviceOs: devDna?.operatingSystem ?? null,
           publicIp: devDna?.publicIp ?? null,
         });
         encryptionMethod = 'persistent-dna';
@@ -3334,12 +3291,16 @@ function EncryptPreviewPage({
 
       setEncryptedImage(embeddedImageBase64);
       
-      // Create encryption package with full forensic metadata
+      // Create encryption package with full forensic metadata.
+      // encrypted_data MUST be the watermarked image — this is the asset that
+      // gets saved to vault, uploaded to Cloudinary, and downloaded/shared.
+      // Using the original `image` here means every shared file has zero ownership.
       const encryptedPackage = {
-        encrypted_data: image,
+        encrypted_data: embeddedImageBase64,
         encryptedImage: embeddedImageBase64,
         metadata: {
           userId: userId,
+          ownerName: userName || localStorage.getItem('biovault_userName') || userId,
           timestamp: encTimestamp,
           encryptionMethod: encryptionMethod,
           size: image.length,
@@ -3369,7 +3330,71 @@ function EncryptPreviewPage({
       };
       
       setEncryptedData(encryptedPackage);
-      
+
+      // Push DNA ownership record to local store + Supabase so any user with
+      // the APK can look up the original owner via dna_id cross-device.
+      try {
+        const { saveDnaRecord } = await import('@/lib/dna/dnaRecordStore');
+        const ownerNameForRecord = userName || localStorage.getItem('biovault_userName') || userId;
+        saveDnaRecord({
+          dnaId,
+          signature: dnaId,
+          userId,
+          fileName: encFileName,
+          fileType: 'image/jpeg',
+          sizeBytes: embeddedImageBase64.length,
+          sha256: null,
+          pHash: null,
+          aHash: null,
+          dHash: null,
+          edgeSignature: null,
+          hmacSeal: null,
+          ownership: {
+            pinitOwnerId: `PINIT-${userId.slice(0, 8).toUpperCase()}`,
+            userId,
+            ownerName: ownerNameForRecord || undefined,
+            vaultId: `vault-${userId}`,
+            dnaId,
+            assetUuid,
+            assetVersion: 1,
+            encryptionTimestamp: encTimestamp,
+            digitalSignature: dnaId,
+          },
+          deviceNetwork: devDna ? {
+            manufacturer: devDna.manufacturer ?? null,
+            model: devDna.model ?? null,
+            operatingSystem: devDna.operatingSystem ?? null,
+            osVersion: devDna.osVersion ?? null,
+            platform: devDna.platform ?? null,
+            browserVersion: devDna.browserVersion ?? null,
+            deviceFingerprint: devDna.deviceFingerprint ?? null,
+            publicIp: devDna.publicIp ?? null,
+            gpsLat: devDna.gpsLat ?? null,
+            gpsLng: devDna.gpsLng ?? null,
+            address: devDna.address ?? null,
+            village: devDna.village ?? null,
+            area: devDna.area ?? null,
+            road: devDna.road ?? null,
+            city: devDna.city ?? null,
+            state: devDna.state ?? null,
+            country: devDna.country ?? null,
+            timeZone: devDna.timeZone ?? null,
+            capturedAt: encTimestamp,
+          } : null,
+          custody: [{
+            id: `${dnaId}-created`,
+            dnaId,
+            eventType: 'encrypted',
+            timestamp: encTimestamp,
+            userId,
+            deviceInfo: devDna?.deviceFingerprint ?? null,
+            location: devDna?.gpsLat != null ? `${devDna.gpsLat},${devDna.gpsLng}` : null,
+            networkInfo: devDna?.publicIp ?? null,
+          }],
+          createdAt: encTimestamp,
+        });
+      } catch { /* non-critical — pixel DNA in the image is the primary ownership proof */ }
+
       // Auto-save to vault after encryption
       try {
         await onSaveToVault(encryptedPackage);
@@ -3579,6 +3604,11 @@ function SharePage({
   const [configTab, setConfigTab] = useState<'access' | 'security' | 'tracking'>('access');
   const [oneTimeUse, setOneTimeUse] = useState(false);
   const [blockVpn, setBlockVpn] = useState(false);
+  // Scenario 5 — TEP state (local to SharePage where it's used)
+  const [isTepShare, setIsTepShare] = useState(false);
+  const [tepRecipientName, setTepRecipientName] = useState('');
+  const [tepRecipientEmail, setTepRecipientEmail] = useState('');
+  const [tepRecipientOrg, setTepRecipientOrg] = useState('');
   const [requireOtp, setRequireOtp] = useState(false);
   const [geoFence, setGeoFence] = useState('all');
   const [deviceLock, setDeviceLock] = useState<'all' | 'mobile' | 'desktop'>('all');
@@ -3587,6 +3617,39 @@ function SharePage({
   const [alertOnOpen, setAlertOnOpen] = useState(false);
   const [alertOnForward, setAlertOnForward] = useState(false);
   const [disableRightClick, setDisableRightClick] = useState(false);
+
+  // Resolved preview image for native share intents (WhatsApp, Telegram, etc.)
+  const [resolvedFilePreview, setResolvedFilePreview] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!selectedShareImage || !userId) { setResolvedFilePreview(undefined); return; }
+    let cancelled = false;
+    (async () => {
+      const img = (selectedShareImage as any)?.encryptedImage;
+      if (img && img.length > 5000) { if (!cancelled) setResolvedFilePreview(img); return; }
+      try {
+        const stored = localStorage.getItem(`pinit_vault_documents_${userId}`);
+        if (stored) {
+          const docs = JSON.parse(stored) as VaultDocument[];
+          const local = docs.find((d) => d.id === selectedShareImage.id || d.name === selectedShareImage.name);
+          if (local?.encryptedImage && local.encryptedImage.length > 5000) {
+            if (!cancelled) setResolvedFilePreview(local.encryptedImage); return;
+          }
+        }
+      } catch { /* ignore */ }
+      try {
+        const stored = await appStorage.getItem(`pinit_vault_documents_${userId}`);
+        if (stored) {
+          const docs = JSON.parse(stored) as VaultDocument[];
+          const local = docs.find((d) => d.id === selectedShareImage.id || d.name === selectedShareImage.name);
+          if (local?.encryptedImage && local.encryptedImage.length > 5000) {
+            if (!cancelled) setResolvedFilePreview(local.encryptedImage); return;
+          }
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setResolvedFilePreview(undefined);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedShareImage, userId]);
 
   const securityScore = Math.min(100, [
     sharePassword ? 20 : 0,
@@ -3656,10 +3719,10 @@ function SharePage({
       // Backend-loaded docs often omit encryptedImage, so we fall back to the
       // localStorage copy which always has it.
       let imageUrlForShare: string | null = null;
+      let previewDataUrl: string | null = null;
 
       try {
         // ── Step 1: get encryptedImage from in-memory doc or localStorage ────
-        let previewDataUrl: string | null = null;
 
         const getEncryptedImage = (doc: VaultDocument): string | null => {
           // Require at least 5 KB of base64 — shorter values are truncated placeholders
@@ -3854,6 +3917,9 @@ function SharePage({
       if (previewDataUrl && previewDataUrl.startsWith('data:image')) {
         try {
           const { embedPersistentDna } = await import('@/lib/dna/persistentDna');
+          // Preserve original owner's GPS + device info so that anyone who scans
+          // the shared image can see the owner's phone and location details.
+          const meta = (selectedShareImage as any)?.metadata ?? {};
           const shareVariantPayload = {
             ownerId: userId || 'unknown',
             pinitId: userId || 'unknown',
@@ -3861,16 +3927,17 @@ function SharePage({
             assetUuid: shareId,
             timestamp: new Date().toISOString(),
             signature: `SHARE_VARIANT:${shareId}`,
-            ownerName: selectedShareImage.metadata?.ownerName || selectedShareImage.metadata?.ownerId || 'PINIT Owner',
-            gpsLat: null,
-            gpsLng: null,
-            address: null,
-            city: null,
-            state: null,
-            country: null,
-            deviceModel: null,
-            deviceManufacturer: null,
-            publicIp: null,
+            ownerName: meta.ownerName || userName || localStorage.getItem('biovault_userName') || userId || 'PINIT Owner',
+            gpsLat: meta.gpsLat ?? null,
+            gpsLng: meta.gpsLng ?? null,
+            address: meta.address ?? null,
+            city: meta.city ?? null,
+            state: meta.state ?? null,
+            country: meta.country ?? null,
+            deviceModel: meta.deviceModel ?? null,
+            deviceManufacturer: meta.deviceManufacturer ?? null,
+            deviceOs: meta.os ?? null,
+            publicIp: meta.publicIp ?? null,
           };
           subscriberVariantImage = await embedPersistentDna(previewDataUrl, shareVariantPayload);
         } catch {
@@ -3904,6 +3971,15 @@ function SharePage({
             })()
           : null,
       };
+
+      // TEP fields — uses same try-catch retry pattern as vault_image_id so missing
+      // columns never block share link generation.
+      if (isTepShare && tepRecipientName.trim()) {
+        insertPayload.is_tep = true;
+        insertPayload.recipient_name = tepRecipientName.trim();
+        if (tepRecipientEmail.trim()) insertPayload.recipient_email = tepRecipientEmail.trim();
+        if (tepRecipientOrg.trim()) insertPayload.recipient_org = tepRecipientOrg.trim();
+      }
 
       // Attempt to store the image URL — if vault_image_id column type rejects it
       // the catch below will retry without it so the share still works.
@@ -4139,6 +4215,50 @@ function SharePage({
           >
             {configTab === 'access' && (
               <>
+                {/* TEP — Tracked Export Package */}
+                <div className="rounded-xl border border-blue-500/30 bg-blue-900/10 p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Briefcase className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-bold text-white">Enterprise TEP</span>
+                    <span className="ml-auto text-[10px] bg-blue-800/50 text-blue-300 px-2 py-0.5 rounded-full">Scenario 5</span>
+                  </div>
+                  <button
+                    onClick={() => setIsTepShare(!isTepShare)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-medium transition-all mb-2.5 ${isTepShare ? 'bg-blue-600/20 border-blue-500/40 text-blue-300' : 'bg-slate-800/50 border-slate-700/40 text-slate-400'}`}
+                  >
+                    <span>Enable Tracked Export Package (TEP)</span>
+                    <span className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${isTepShare ? 'bg-blue-600' : 'bg-slate-700'}`}>
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isTepShare ? 'left-4' : 'left-0.5'}`} />
+                    </span>
+                  </button>
+                  {isTepShare && (
+                    <div className="space-y-2 mt-1">
+                      <p className="text-[10px] text-blue-300/80 mb-2">Per-recipient watermark — identifies the specific employee if document leaks. HR/Legal report generated on breach (not DMCA).</p>
+                      <input
+                        type="text"
+                        value={tepRecipientName}
+                        onChange={(e) => setTepRecipientName(e.target.value)}
+                        placeholder="Recipient full name *"
+                        className="w-full px-3 py-2 bg-slate-800/80 border border-blue-500/20 rounded-xl text-white text-xs focus:border-blue-500/60 outline-none"
+                      />
+                      <input
+                        type="email"
+                        value={tepRecipientEmail}
+                        onChange={(e) => setTepRecipientEmail(e.target.value)}
+                        placeholder="Recipient email"
+                        className="w-full px-3 py-2 bg-slate-800/80 border border-blue-500/20 rounded-xl text-white text-xs focus:border-blue-500/60 outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={tepRecipientOrg}
+                        onChange={(e) => setTepRecipientOrg(e.target.value)}
+                        placeholder="Department / Organization"
+                        className="w-full px-3 py-2 bg-slate-800/80 border border-blue-500/20 rounded-xl text-white text-xs focus:border-blue-500/60 outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {/* Expiry */}
                 <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-900/10 p-3.5">
                   <div className="flex items-center gap-2 mb-2.5">
@@ -4687,27 +4807,32 @@ function VerifyProofPage({ image, onBack }: { image: string; onBack: () => void 
         const deviceNet = dnaRecord?.deviceNetwork ?? null;
 
         const ownerId     = persistentResult?.ownerId || dnaRecord?.userId || legacyResult?.userId || 'No Owner ID Found';
-        const ownerName   = ownership?.ownerName ?? null;
+        // ownerName: watermark is primary source (survives without cloud access).
+        // Cloud record supplements with extra detail when available.
+        const ownerName   = persistentResult?.ownerName ?? ownership?.ownerName ?? null;
         const dnaId       = persistentResult?.dnaId || dnaRecord?.dnaId || 'N/A';
-        const timestamp   = ownership?.encryptionTimestamp || dnaRecord?.createdAt || persistentResult?.timestamp || legacyResult?.timestamp || 'N/A';
+        // timestamp: watermark carries the original encryption time — prefer it over cloud record.
+        const timestamp   = persistentResult?.timestamp || ownership?.encryptionTimestamp || dnaRecord?.createdAt || legacyResult?.timestamp || 'N/A';
         const gpsLat      = deviceNet?.gpsLat ?? null;
         const gpsLng      = deviceNet?.gpsLng ?? null;
         const locParts    = deviceNet ? [deviceNet.city, deviceNet.state, deviceNet.country].filter(Boolean) : [];
         const locationStr = locParts.length > 0 ? locParts.join(', ') : null;
         const deviceInfo  = deviceNet ? `${deviceNet.manufacturer || ''} ${deviceNet.model || ''}`.trim() || null : null;
 
-        const verificationMethod = dnaRecord
-          ? (persistentResult
-              ? 'Pixel DNA · Amplitude-8 Tiling'
-              : fuzzyMatch
+        const verificationMethod = persistentResult
+          ? (dnaRecord
+              ? 'Pixel DNA · Amplitude-14 Tiling + Cloud Verified'
+              : 'Pixel DNA · Amplitude-14 Tiling (watermark only)')
+          : dnaRecord
+            ? (fuzzyMatch
                 ? `Perceptual Hash · ${fuzzyMatch.similarity.toFixed(0)}% visual match`
                 : 'Cloud Record Lookup')
-          : legacyResult?.userId
-            ? 'Legacy LSB Watermark'
-            : 'Not found';
+            : legacyResult?.userId
+              ? 'Legacy LSB Watermark'
+              : 'Not found';
 
         const confidence = persistentResult && dnaRecord ? 99
-          : persistentResult ? 85
+          : persistentResult ? 90
           : fuzzyMatch ? Math.round(fuzzyMatch.similarity)
           : legacyResult?.userId ? 75
           : 0;

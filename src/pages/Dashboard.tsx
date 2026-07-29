@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { appStorage } from "@/lib/storage";
 import { PINITVaultDashboard } from "@/components/PINITVaultDashboard";
+import { registerPushNotifications } from "@/lib/pushNotificationService";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -12,46 +13,44 @@ const Dashboard = () => {
   const [isTemporaryAccess, setIsTemporaryAccess] = useState(false);
   const [isRestricted, setIsRestricted] = useState(false);
 
-  console.log('🚀 [Dashboard] Component mounted');
 
   useEffect(() => {
     const loadUser = async () => {
-      try {
-        console.log('📋 [Dashboard] Loading userId from storage...');
-        // Always check both storages — appStorage may return null without throwing on Android
-        let id: string | null = null;
+      // Poll for up to 10s: Capacitor Preferences bridge takes time after Android
+      // kills the WebView process (e.g. when camera opens and OS reclaims memory).
+      const pollMs = 400;
+      const maxMs = 10000;
+      const deadline = Date.now() + maxMs;
+      let id: string | null = null;
+
+      while (Date.now() < deadline) {
         try {
           id = await appStorage.getItem("biovault_userId");
-        } catch (err) {
-          console.warn("⚠️ [Dashboard] appStorage.getItem failed:", err);
-        }
-        // Always fall back to localStorage if appStorage returned null/undefined
-        if (!id) {
-          id = localStorage.getItem("biovault_userId");
-          if (id) console.log("📍 [Dashboard] userId from localStorage:", id);
-        } else {
-          console.log("✅ [Dashboard] userId from appStorage:", id);
-          // Mirror to localStorage so future checks are instant
+        } catch { /* bridge not ready */ }
+        if (!id) id = localStorage.getItem("biovault_userId");
+        if (id) {
           localStorage.setItem("biovault_userId", id);
+          break;
         }
-        setUserId(id);
-      } catch (err) {
-        console.error("❌ [Dashboard] Failed to load userId:", err);
-        const localId = localStorage.getItem("biovault_userId");
-        console.log("📍 [Dashboard] Fallback to localStorage:", localId);
-        setUserId(localId);
-      } finally {
-        setIsLoadingUser(false);
+        await new Promise(r => setTimeout(r, pollMs));
       }
+
+      setUserId(id);
+      if (id) registerPushNotifications(id).catch(() => {});
+      setIsLoadingUser(false);
     };
     loadUser();
+
+    // Navigate to Activity when a push notification is tapped
+    const onOpenActivity = () => navigate("/dashboard");
+    window.addEventListener("pinit:open-activity", onOpenActivity);
+    return () => window.removeEventListener("pinit:open-activity", onOpenActivity);
 
     // Check if user has temporary access
     const tempAccess = (location.state as any)?.tempAccess || false;
     const restricted = (location.state as any)?.restricted || false;
     
     if (tempAccess || restricted) {
-      console.log('⏱️ Dashboard: Temporary access detected');
       setIsTemporaryAccess(true);
       setIsRestricted(true);
     }
@@ -59,7 +58,6 @@ const Dashboard = () => {
 
   // Show loading state while userId is loading
   if (isLoadingUser) {
-    console.log('📊 [Dashboard] Showing loading screen...');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-black">
         <motion.div
@@ -97,7 +95,6 @@ const Dashboard = () => {
   // SAFETY CHECK: If we somehow got here without a userId, redirect back to login, NOT register
   if (!userId && !isLoadingUser) {
     console.error('❌ [Dashboard] CRITICAL: No userId found - redirecting to login');
-    console.log('📍 This prevents infinite register loop');
     // Don't redirect again if already in a navigation state
     setTimeout(() => {
       navigate("/login", { replace: true });
@@ -116,7 +113,6 @@ const Dashboard = () => {
     navigate("/register", { replace: true });
   };
 
-  console.log('🎨 [Dashboard] Rendering with userId:', userId);
   
   return <PINITVaultDashboard userId={userId || undefined} />;
 };

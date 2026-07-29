@@ -23,56 +23,37 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     if (syncAuthorized) return;
 
     const verify = async () => {
-      try {
-        console.log('🔐 [ProtectedRoute] ============ TOKEN VERIFICATION STARTING ============');
+      // Poll every 400ms for up to 12s: Capacitor Preferences bridge can take
+      // 2-5s to initialize after Android kills the WebView process (e.g. during camera).
+      const pollMs = 400;
+      const maxMs = 12000;
+      const deadline = Date.now() + maxMs;
 
-        // Small delay so Capacitor Preferences finish flushing after login
-        await new Promise(resolve => setTimeout(resolve, 400));
-        console.log('🔐 [ProtectedRoute] Storage wait complete');
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, pollMs));
 
-        // ── Check appStorage (Capacitor Preferences on Android) ──────────────
         let token: string | null = null;
         let userId: string | null = null;
-        let source = '';
 
         try {
           token  = await appStorage.getItem("biovault_token");
           userId = await appStorage.getItem("biovault_userId");
           if (token && userId) {
-            source = 'appStorage';
-            console.log('✅ [ProtectedRoute] Token + userId found in appStorage');
-            // Mirror to localStorage so future navigations are instant
             localStorage.setItem("biovault_token",  token);
             localStorage.setItem("biovault_userId", userId);
-          } else {
-            console.log('⚠️ [ProtectedRoute] appStorage returned null — checking localStorage');
           }
-        } catch (err) {
-          console.warn('⚠️ [ProtectedRoute] appStorage.getItem failed:', err);
-        }
+        } catch { /* bridge not ready yet */ }
 
-        // ── Fallback to localStorage (always, not just on error) ─────────────
         if (!token)  token  = localStorage.getItem("biovault_token");
         if (!userId) userId = localStorage.getItem("biovault_userId");
-        if (!source && token && userId) source = 'localStorage';
-
-        console.log('🔐 [ProtectedRoute] Final verification:', {
-          hasToken: !!token,
-          hasUserId: !!userId,
-          source,
-        });
 
         if (token && userId) {
-          console.log("✅✅✅ [ProtectedRoute] AUTHORIZED from:", source);
           setState("authorized");
-        } else {
-          console.log("❌❌❌ [ProtectedRoute] No valid credentials — redirecting to login");
-          setState("unauthorized");
+          return;
         }
-      } catch (err) {
-        console.error('❌ [ProtectedRoute] Verification error:', err);
-        setState("unauthorized");
       }
+
+      setState("unauthorized");
     };
 
     verify();
@@ -90,6 +71,5 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  console.log('🚀 [ProtectedRoute] state:', state, '- rendering:', state === "authorized" ? "✅ Dashboard" : "❌ Redirect to login");
   return state === "authorized" ? children : <Navigate to="/login" replace />;
 }
