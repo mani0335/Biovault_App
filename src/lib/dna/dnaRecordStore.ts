@@ -4,6 +4,12 @@ import type { DnaRecord, CustodyEvent } from './types';
 
 const STORAGE_KEY = 'pinit_dna_records_v1';
 
+function safeJsonParse<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value !== 'string') return value as T;
+  try { return JSON.parse(value) as T; } catch { return fallback; }
+}
+
 function loadAll(): Record<string, DnaRecord> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -100,9 +106,9 @@ function rowToRecord(row: any): DnaRecord {
     dHash: row.d_hash || null,
     edgeSignature: row.edge_signature || null,
     hmacSeal: row.hmac_seal || null,
-    ownership: row.ownership ? (typeof row.ownership === 'string' ? JSON.parse(row.ownership) : row.ownership) : null,
-    deviceNetwork: row.device_network ? (typeof row.device_network === 'string' ? JSON.parse(row.device_network) : row.device_network) : null,
-    custody: row.custody ? (typeof row.custody === 'string' ? JSON.parse(row.custody) : row.custody) : [],
+    ownership: safeJsonParse(row.ownership, null),
+    deviceNetwork: safeJsonParse(row.device_network, null),
+    custody: safeJsonParse(row.custody, []),
     createdAt: row.created_at || new Date().toISOString(),
   };
 }

@@ -12,7 +12,6 @@ import { Device } from '@capacitor/device';
  * even after uninstall/reinstall because it uses Android's hardware UUID
  */
 export async function getDeviceToken(): Promise<string> {
-  console.log('🔐 [DEVICE TOKEN] Fetching persistent device identifier...');
   
   const STORAGE_KEY = 'biovault_deviceToken';
   const HARDWARE_UUID_KEY = 'biovault_hardwareUUID';
@@ -20,41 +19,34 @@ export async function getDeviceToken(): Promise<string> {
   // ✅ Step 1: Check if we already cached the hardware UUID
   let cachedUUID = localStorage.getItem(HARDWARE_UUID_KEY);
   if (cachedUUID) {
-    console.log('✅ [DEVICE TOKEN] Using cached hardware UUID:', cachedUUID);
     return cachedUUID;
   }
   
   // ✅ Step 2: Try to get hardware UUID from Capacitor Device
   try {
     const deviceInfo = await Device.getId();
-    console.log('📱 [DEVICE TOKEN] Device info from Capacitor:', deviceInfo);
     
     if (deviceInfo && deviceInfo.uuid) {
       const hardwareUUID = deviceInfo.uuid;
-      console.log('✅ [DEVICE TOKEN] Got hardware UUID from Android:', hardwareUUID);
       
       // Cache it so we never query again
       localStorage.setItem(HARDWARE_UUID_KEY, hardwareUUID);
       localStorage.setItem(STORAGE_KEY, hardwareUUID);
       
-      console.log('💾 [DEVICE TOKEN] Cached UUID in localStorage - will persist after uninstall!');
       return hardwareUUID;
     }
   } catch (error: any) {
-    console.warn('⚠️ [DEVICE TOKEN] Could not get hardware UUID:', error?.message);
   }
   
   // ✅ Step 3: Fallback - check for old stored token
   let token = localStorage.getItem(STORAGE_KEY);
   if (token) {
-    console.log('✅ [DEVICE TOKEN] Using stored fallback token:', token);
     return token;
   }
   
   // ✅ Step 4: Last resort - generate temporary token
   token = 'dev-' + Math.random().toString(36).slice(2) + '-' + Date.now();
   localStorage.setItem(STORAGE_KEY, token);
-  console.log('⚠️ [DEVICE TOKEN] Generated fallback token (not permanent):', token);
   
   return token;
 }

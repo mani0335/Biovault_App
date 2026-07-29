@@ -67,15 +67,12 @@ export default function ScanDocumentFlow({
 
       for (let i = 0; i < constraints.length; i++) {
         try {
-          console.log(` Trying camera configuration ${i + 1}/${constraints.length}`);
           setStatus(` Trying camera config ${i + 1}...`);
           
           stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
-          console.log(` Camera configuration ${i + 1} successful`);
           break;
         } catch (err) {
           lastError = err instanceof Error ? err : new Error("Camera access failed");
-          console.warn(` Camera configuration ${i + 1} failed:`, lastError.message);
           
           // If it's the last attempt, don't continue
           if (i === constraints.length - 1) {
@@ -114,7 +111,6 @@ export default function ScanDocumentFlow({
         setIsCameraReady(true);
         setCameraActive(true);
         setStatus(" Camera ready - Position document");
-        console.log(" Camera successfully started");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Camera error";
@@ -184,7 +180,6 @@ export default function ScanDocumentFlow({
     }
 
     stopCamera();
-    console.log(`📄 Scanned ${pages.length} pages`);
     onSuccess(pages);
   }, [pages, onSuccess, stopCamera]);
 

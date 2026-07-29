@@ -26,7 +26,6 @@ const SelectDocumentsPage = () => {
 
   useEffect(() => {
     // Temporary debug logs for navigation state visibility.
-    console.log("SelectDocuments location.state:", location.state);
   }, [location.state]);
 
   const shouldShowFallback = !initialDraft && (!portfolioName || !portfolioType);

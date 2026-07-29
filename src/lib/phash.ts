@@ -189,7 +189,6 @@ export const computePHashFromBase64 = async (base64Data: string): Promise<string
     return new Promise((resolve) => {
       // Check if Image constructor is available
       if (typeof Image === 'undefined') {
-        console.warn('Image constructor not available for pHash computation');
         resolve(null);
         return;
       }
@@ -200,7 +199,6 @@ export const computePHashFromBase64 = async (base64Data: string): Promise<string
       img.onload = () => {
         // Check if document and canvas are available
         if (typeof document === 'undefined' || typeof document.createElement === 'undefined') {
-          console.warn('Document or canvas not available for pHash computation');
           resolve(null);
           return;
         }

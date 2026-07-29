@@ -84,7 +84,6 @@ export const ImageCryptoFull: React.FC<ImageCryptoFullProps> = ({ userId = 'user
           const ratio = Math.min(maxWidth / width, maxHeight / height);
           width = Math.floor(width * ratio);
           height = Math.floor(height * ratio);
-          console.log(`📦 Resizing image from ${img.width}x${img.height} to ${width}x${height}`);
         }
 
         const canvas = document.createElement('canvas');

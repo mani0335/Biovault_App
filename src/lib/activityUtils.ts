@@ -54,7 +54,6 @@ export const logActivity = (
     })
   );
 
-  console.log('📝 Activity logged:', action, fileName);
   return log;
 };
 

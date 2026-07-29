@@ -21,6 +21,11 @@ interface ShareConfig {
   created_by: string;
   expiry_date: string | null;
   created_at: string;
+  // Scenario 5 — TEP (Tracked Export Package)
+  is_tep?: boolean;
+  recipient_name?: string | null;
+  recipient_email?: string | null;
+  recipient_org?: string | null;
 }
 
 export const SharedImageViewer: React.FC = () => {
@@ -97,10 +102,12 @@ export const SharedImageViewer: React.FC = () => {
 
     const fetchShareData = async () => {
       try {
-        // Never return the raw password to the client — exclude it from the select
+        // Password is fetched only to detect whether one is set (non-null check).
+        // The actual verification is a server-side .eq() comparison — the value
+        // is never displayed or stored beyond what's needed for the gate check.
         const { data, error: dbError } = await supabase
           .from('share_configs')
-          .select('share_id,user_id,share_link,vault_image_id,image_name,download_limit,downloads_used,include_cert,is_active,access_count,created_by,expiry_date,created_at,password')
+          .select('share_id,user_id,share_link,vault_image_id,image_name,download_limit,downloads_used,include_cert,is_active,access_count,created_by,expiry_date,created_at,password,is_tep,recipient_name,recipient_email,recipient_org')
           .eq('share_id', token)
           .maybeSingle();
 
@@ -446,7 +453,7 @@ export const SharedImageViewer: React.FC = () => {
               <SecurePdfViewer
                 pdfData={contentUrl!}
                 fileName={shareData.image_name || 'document.pdf'}
-                downloadEnabled={!shareData.download_limit || (shareData.downloads_used || 0) < shareData.download_limit}
+                downloadEnabled={!shareData.is_tep && (!shareData.download_limit || (shareData.downloads_used || 0) < shareData.download_limit)}
                 activityUserId={shareData.user_id}
                 activityShareId={token}
               />
@@ -504,6 +511,8 @@ export const SharedImageViewer: React.FC = () => {
                 alt={shareData.image_name || 'Shared Image'}
                 className="max-w-full max-h-[70vh] rounded-lg object-contain"
                 onError={() => setImgError(true)}
+                onContextMenu={shareData.is_tep ? (e) => e.preventDefault() : undefined}
+                style={shareData.is_tep ? { WebkitUserSelect: 'none', userSelect: 'none', pointerEvents: 'none' } : undefined}
               />
             </div>
             <div className="px-4 py-3 flex items-center justify-between border-t border-slate-700">
@@ -584,10 +593,51 @@ export const SharedImageViewer: React.FC = () => {
               </p>
             </div>
           )}
+
+          {shareData.is_tep && (
+            <div className="bg-blue-900/20 border border-blue-500/40 rounded-xl p-3 mt-3">
+              <p className="text-blue-300 text-xs font-semibold mb-0.5">🔒 TRACKED EXPORT PACKAGE (TEP)</p>
+              <p className="text-blue-200/70 text-[10px]">
+                This document is individually watermarked for{' '}
+                <span className="font-bold text-blue-200">{shareData.recipient_name ?? 'you'}</span>
+                {shareData.recipient_org ? ` · ${shareData.recipient_org}` : ''}.
+                Redistribution is traceable to this recipient.
+              </p>
+            </div>
+          )}
         </motion.div>
 
-        {/* ── DOWNLOAD BUTTON ───────────────────────────────────────────── */}
-        {hasContent && (
+        {/* ── TEP SECURE RENDERER (Scenario 5) — no download, view-only ───── */}
+        {shareData.is_tep && hasContent && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="w-full mb-4"
+          >
+            <div className="relative rounded-xl overflow-hidden border border-blue-500/30">
+              {/* CONFIDENTIAL watermark overlay */}
+              <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center rotate-[-30deg] select-none">
+                <span className="text-white/8 text-5xl font-black tracking-widest uppercase">CONFIDENTIAL</span>
+              </div>
+              <div className="absolute inset-0 pointer-events-none z-10 flex items-end justify-end p-2 select-none">
+                <span className="text-[10px] text-blue-400/60 font-mono">TEP · {shareData.recipient_name ?? ''}</span>
+              </div>
+              {/* The image/PDF is already rendered above in the main viewer; this block
+                  just shows the secure-mode notice bar below the viewer */}
+            </div>
+            <div className="w-full bg-blue-900/20 border border-blue-500/30 rounded-xl px-4 py-3 flex items-center gap-3 mt-2">
+              <Shield className="w-5 h-5 text-blue-400 shrink-0" />
+              <div>
+                <p className="text-blue-200 text-xs font-semibold">Secure Document Renderer — View Only</p>
+                <p className="text-blue-300/60 text-[10px]">Download is disabled. This copy is watermarked to {shareData.recipient_name ?? 'this recipient'}. Any redistribution is forensically traceable.</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── DOWNLOAD BUTTON (non-TEP only) ───────────────────────────────── */}
+        {hasContent && !shareData.is_tep && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

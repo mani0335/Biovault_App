@@ -14,7 +14,6 @@ export function encryptFile(
   // Simulate encryption by base64 encoding + xor
   const encrypted = simulateEncryption(fileData, key);
 
-  console.log("🔐 File encryption simulated");
   return {
     encrypted,
     key,
@@ -27,7 +26,6 @@ export function encryptFile(
 export function decryptFile(encrypted: string, key: string): string {
   try {
     const decrypted = simulateDecryption(encrypted, key);
-    console.log("🔓 File decryption simulated");
     return decrypted;
   } catch (err) {
     console.error("Decryption failed:", err);

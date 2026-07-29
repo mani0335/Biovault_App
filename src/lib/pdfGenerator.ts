@@ -25,9 +25,6 @@ export async function imagesToPDF(
         throw new Error("No images provided for PDF generation");
       }
 
-      console.log(
-        `📄 Generating PDF with ${imageBase64Array.length} pages...`
-      );
 
       // Create PDF
       // @ts-ignore - jsPDF types
@@ -87,12 +84,6 @@ export async function imagesToPDF(
             if (index === imageBase64Array.length - 1) {
               // Get PDF as blob
               const blob = pdf.output("blob");
-              console.log(
-                "✅ PDF generated:",
-                blob.size,
-                "bytes,",
-                blob.type
-              );
               resolve(blob);
             }
           };
@@ -127,7 +118,6 @@ export function downloadBlob(blob: Blob, fileName: string): void {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  console.log(`📥 Downloaded: ${fileName}`);
 }
 
 /**

@@ -50,16 +50,12 @@ export function FingerprintScanner({
     setMessage("Place your finger on the sensor...");
 
     try {
-      console.log('\n\n FINGERPRINT SCAN STARTED');
       const sensorCheck = await isBiometricAvailable();
       
       if (!sensorCheck.available) {
-        console.warn(' SENSOR NOT DETECTED - Using fallback method');
-        console.log('   Reason:', sensorCheck.reason);
         
         // FALLBACK: Create mock fingerprint credential for database storage
         if (mode === 'register' && userId) {
-          console.log(' STEP 2: FALLBACK - Creating mock fingerprint credential');
           
           const credentialId = generateFingerprintCredentialId(userId);
           const mockCredential = {
@@ -81,10 +77,8 @@ export function FingerprintScanner({
             reason: sensorCheck.reason
           };
           
-          console.log('   Created mock fingerprint credential:', mockCredential);
           onCredential?.(mockCredential);
           
-          console.log(' FALLBACK SUCCESS - Mock credential created and passed');
           setStatus('success');
           setMessage('Fingerprint Registered (Fallback Mode)');
           // Clear any error state immediately
@@ -100,8 +94,6 @@ export function FingerprintScanner({
       // Sensor found - no popup message
       
       // STEP 2: Show biometric dialog and WAIT for user
-      console.log('\n STEP 2: Showing biometric dialog...');
-      console.log(' YOU MUST SCAN YOUR FINGERPRINT NOW');
       const scanStartTime = Date.now();
       
       // This call blocks until user scans (or timeout)
@@ -112,15 +104,12 @@ export function FingerprintScanner({
         });
         
         const scanDuration = Date.now() - scanStartTime;
-        console.log('\n Biometric dialog closed after', scanDuration + 'ms');
         
-        console.log('SCAN COMPLETED - user authentication received');
       } catch (biometricError: any) {
         console.error(' Biometric scan failed:', biometricError.message);
         
         // FALLBACK: If biometric fails, still create credential for database
         if (mode === 'register' && userId) {
-          console.log(' STEP 3: FALLBACK - Biometric failed, creating credential anyway');
           
           const credentialId = generateFingerprintCredentialId(userId);
           const fallbackCredential = {
@@ -142,10 +131,8 @@ export function FingerprintScanner({
             biometricError: biometricError.message
           };
           
-          console.log('   Created fallback credential:', fallbackCredential);
           onCredential?.(fallbackCredential);
           
-          console.log(' FALLBACK SUCCESS - Credential created despite biometric failure');
           setStatus('success');
           setMessage('Fingerprint Registered (Fallback Mode)');
           // Clear any error state immediately
@@ -159,7 +146,6 @@ export function FingerprintScanner({
       }
       
       if (mode === 'register') {
-        console.log('\n STEP 3: REGISTER MODE - Saving fingerprint credential');
         
         if (!userId) throw new Error('User ID required');
         
@@ -181,7 +167,6 @@ export function FingerprintScanner({
           }))
         };
         
-        console.log('   Generated fingerprint credential:', nativeCredential);
         
         // CRITICAL: Pass credential to parent component for backend storage
         onCredential?.(nativeCredential);
@@ -189,12 +174,9 @@ export function FingerprintScanner({
         // Store locally for backup
         try {
           await appStorage.setItem(`fingerprint_credential_${userId}`, JSON.stringify(nativeCredential));
-          console.log('   Fingerprint credential saved locally');
         } catch (e) {
-          console.warn('   Could not store locally:', e);
         }
         
-        console.log(' Fingerprint registered - credential passed to parent\n');
         setStatus('success');
         setMessage(' Fingerprint Registered');
         // Clear any error state immediately
@@ -205,18 +187,14 @@ export function FingerprintScanner({
       }
       
       if (mode === 'login') {
-        console.log('\n STEP 3: LOGIN MODE - Verifying with backend');
-        console.log('\n▶ STEP 3: LOGIN MODE - Verifying with backend');
         setMessage('Verifying with backend...');
         
         const loginUserId = userId || await appStorage.getItem('biovault_userId');
         if (!loginUserId) throw new Error('User not found');
         
-        console.log('   Login user ID:', loginUserId);
         
         // Generate a credential ID for this login attempt
         const credentialId = generateFingerprintCredentialId(loginUserId);
-        console.log('   Generated credential ID:', credentialId);
         
         // Create a login credential object
         const loginCredential = {
@@ -236,22 +214,17 @@ export function FingerprintScanner({
           }))
         };
         
-        console.log('   Calling backend verification...');
         
         // Call backend to verify fingerprint - use the same endpoint pattern as registration
-        console.log('   Checking if user exists in backend database...');
         const { checkUserRegistered } = await import('@/lib/authService');
         const userCheck = await checkUserRegistered(loginUserId);
-        console.log('   User check result:', userCheck);
         
         if (!userCheck.ok || !userCheck.fingerprintRegistered) {
           console.error('   User not found or fingerprint not registered in backend');
           throw new Error('Fingerprint not found in database. Please register first.');
         }
         
-        console.log('   User found with fingerprint registered - proceeding to face authentication');
         const result = { ok: true, match: true, reason: 'Fingerprint verified' };
-        console.log('   Backend verification result:', result);
         
         const isVerified = result.ok || result.match || (result as any).verified;
         
@@ -260,7 +233,6 @@ export function FingerprintScanner({
           throw new Error(result.reason || 'Fingerprint does not match our records');
         }
         
-        console.log(' Fingerprint verified by backend');
         setStatus('success');
         setMessage(' Fingerprint Verified');
         
@@ -281,7 +253,6 @@ export function FingerprintScanner({
         errMsg.includes('not implemented') ||
         errMsg.includes('Biometric authentication failed')
       )) {
-        console.log('   Error will be handled by fallback logic - not setting error state');
         // Don't set error state - let fallback handle it
         return;
       }
@@ -312,7 +283,6 @@ export function FingerprintScanner({
   // AUTO-TRIGGER biometric scan when required=true
   useEffect(() => {
     if (required && !hasStarted && status === "idle") {
-      console.log(' Auto-triggering fingerprint scan (required mode)');
       setHasStarted(true);
       const timer = setTimeout(() => startScan(), 300);
       return () => clearTimeout(timer);
@@ -320,89 +290,79 @@ export function FingerprintScanner({
   }, [required, hasStarted, status, startScan]);
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center gap-4">
-      <div className="w-full text-center">
-        <h3 className="text-xl md:text-2xl font-display font-semibold tracking-wide text-foreground">
-          Fingerprint Authentication
-        </h3>
-        <p className="text-sm md:text-base text-muted-foreground mt-1">
-          Confirm your identity with a secure biometric scan.
-        </p>
-      </div>
-
-      <div className="relative w-full max-w-[320px] h-[250px] rounded-2xl overflow-hidden border border-border bg-gradient-to-b from-card/95 via-card/85 to-background/90">
-        <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-primary/10 to-transparent" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,hsl(var(--neon-glow)/0.16),transparent_62%)]" />
-        <div 
-          className="absolute inset-0 opacity-20" 
-          style={{ 
-            backgroundImage: "linear-gradient(hsl(var(--border)/0.5) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border)/0.5) 1px, transparent 1px)", 
-            backgroundSize: "18px 18px" 
-          }} 
-        />
-
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between text-xs font-mono tracking-widest font-semibold text-white">
-          <span className="px-3 py-1.5 rounded bg-primary/80 border border-primary">BIOMETRIC</span>
-          <span className={`px-3 py-1.5 rounded border ${
-            status === "scanning" ? "bg-primary/80 border-primary text-white animate-pulse" :
-            status === "success" ? "bg-neon-green/80 border-neon-green text-black" :
-            status === "error" ? "bg-destructive/80 border-destructive text-white" :
-            "bg-background/60 border-border/60 text-foreground/90"
+    <div className="w-full max-w-sm mx-auto flex flex-col items-center gap-5">
+      {/* Scanner area */}
+      <div className="relative w-full flex flex-col items-center">
+        {/* Status badge */}
+        <div className="mb-4">
+          <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold tracking-wider ${
+            status === "scanning" ? "bg-violet-100 text-violet-600 border border-violet-200" :
+            status === "success" ? "bg-emerald-100 text-emerald-600 border border-emerald-200" :
+            status === "error" ? "bg-red-100 text-red-600 border border-red-200" :
+            "bg-slate-100 text-slate-500 border border-slate-200"
           }`}>
-            {status === "scanning" ? "SCANNING" : status === "success" ? " VERIFIED" : status === "error" ? " FAILED" : "READY"}
+            <span className={`w-2 h-2 rounded-full ${
+              status === "scanning" ? "bg-violet-500 animate-pulse" :
+              status === "success" ? "bg-emerald-500" :
+              status === "error" ? "bg-red-500" :
+              "bg-slate-400"
+            }`} />
+            {status === "scanning" ? "SCANNING" : status === "success" ? "VERIFIED" : status === "error" ? "FAILED" : "READY"}
           </span>
         </div>
 
+        {/* Fingerprint circle */}
         <motion.div
-          className={`relative mx-auto mt-9 w-[170px] h-[170px] rounded-full glass-surface flex items-center justify-center overflow-hidden ${
-            status === "success" ? "ring-4 ring-neon-green shadow-[0_0_20px_hsl(var(--neon-green)/0.8)]" : 
-            status === "error" ? "ring-4 ring-destructive shadow-[0_0_20px_hsl(var(--destructive)/0.6)]" : 
-            status === "scanning" ? "ring-4 ring-primary shadow-[0_0_20px_hsl(var(--neon-glow)/0.8)]" :
-            "ring-2 ring-primary/30"
+          className={`relative w-36 h-36 rounded-full flex items-center justify-center ${
+            status === "success" ? "bg-emerald-50 ring-4 ring-emerald-300 shadow-lg shadow-emerald-100" :
+            status === "error" ? "bg-red-50 ring-4 ring-red-300 shadow-lg shadow-red-100" :
+            status === "scanning" ? "bg-violet-50 ring-4 ring-violet-400 shadow-lg shadow-violet-100" :
+            "bg-slate-50 ring-2 ring-slate-200"
           }`}
-          animate={status === "scanning" ? { scale: [1, 1.05, 1] } : {}}
+          animate={status === "scanning" ? { scale: [1, 1.06, 1] } : {}}
           transition={{ repeat: Infinity, duration: 1.2 }}
         >
-          <div className="absolute inset-3 rounded-full border border-primary/25" />
-          <div className="absolute inset-6 rounded-full border border-primary/20" />
-          <ScanEffect type="fingerprint" active={status === "scanning"} />
+          {/* Inner rings */}
+          <div className={`absolute inset-3 rounded-full border ${status === "scanning" ? "border-violet-300/50" : "border-slate-200/60"}`} />
+          <div className={`absolute inset-6 rounded-full border ${status === "scanning" ? "border-violet-200/40" : "border-slate-100/50"}`} />
 
           {status === "scanning" && (
             <motion.div
-              className="absolute left-4 right-4 h-1 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
-              initial={{ y: -52, opacity: 0.65 }}
-              animate={{ y: 52, opacity: [0.35, 1, 0.35] }}
+              className="absolute left-5 right-5 h-0.5 rounded-full bg-gradient-to-r from-transparent via-violet-500 to-transparent"
+              initial={{ y: -40, opacity: 0.65 }}
+              animate={{ y: 40, opacity: [0.3, 1, 0.3] }}
               transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
             />
           )}
 
           <AnimatePresence mode="wait">
             {status === "success" ? (
-              <motion.div key="success" initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                <CheckCircle className="w-16 h-16 text-neon-green" />
+              <motion.div key="success" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                <CheckCircle className="w-14 h-14 text-emerald-500" />
               </motion.div>
             ) : status === "error" ? (
               <motion.div key="error" initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                <XCircle className="w-16 h-16 text-destructive" />
+                <XCircle className="w-14 h-14 text-red-500" />
               </motion.div>
             ) : (
-              <motion.div 
-                key="idle" 
-                animate={status === "scanning" ? { opacity: [0.5, 1, 0.5] } : {}} 
+              <motion.div
+                key="idle"
+                animate={status === "scanning" ? { opacity: [0.5, 1, 0.5] } : {}}
                 transition={{ repeat: Infinity, duration: 1.5 }}
               >
-                <Fingerprint className="w-16 h-16 text-primary" />
+                <Fingerprint className="w-14 h-14 text-violet-500" />
               </motion.div>
             )}
           </AnimatePresence>
         </motion.div>
 
-        <div className="absolute inset-x-5 bottom-4">
-          <div className="w-full h-2.5 bg-background/60 rounded-full overflow-hidden border border-primary/20">
+        {/* Progress bar */}
+        <div className="w-48 mt-5">
+          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <motion.div
-              className={`h-full ${status === "error" ? "bg-destructive/80" : "bg-neon-green"} ${status === "scanning" ? "animate-pulse" : ""}`}
+              className={`h-full rounded-full ${status === "error" ? "bg-red-400" : status === "success" ? "bg-emerald-400" : "bg-violet-500"}`}
               animate={{
-                width: status === "idle" ? "6%" : status === "scanning" ? ["20%", "78%", "58%", "85%"] : "100%",
+                width: status === "idle" ? "0%" : status === "scanning" ? ["15%", "75%", "55%", "85%"] : "100%",
               }}
               transition={{ duration: status === "scanning" ? 1.2 : 0.35, repeat: status === "scanning" ? Infinity : 0 }}
             />
@@ -410,28 +370,32 @@ export function FingerprintScanner({
         </div>
       </div>
 
-      <div className="w-full max-w-xs flex flex-col items-center gap-3">
-        <p className="text-center text-sm md:text-base font-medium text-muted-foreground min-h-6">
-          {message || "Ready for biometric verification"}
+      {/* Message + actions */}
+      <div className="w-full flex flex-col items-center gap-3">
+        <p className="text-center text-sm font-medium text-slate-500 min-h-5">
+          {message || "Place your finger on the sensor"}
         </p>
 
         <div className="flex items-center justify-center gap-2 flex-wrap">
           {status === "idle" && (
-            <Button variant="cyber" size="lg" onClick={startScan}>
+            <button
+              onClick={startScan}
+              className="px-8 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-bold text-sm shadow-lg shadow-violet-200/40 active:scale-95 transition-transform"
+            >
               {mode === "register" ? "Capture Fingerprint" : "Verify Fingerprint"}
-            </Button>
+            </button>
           )}
 
           {status === "scanning" && !required && (
-            <Button variant="outline" size="lg" onClick={cancelScan}>
+            <button onClick={cancelScan} className="px-6 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-semibold text-sm border border-slate-200">
               Cancel
-            </Button>
+            </button>
           )}
 
           {status === "error" && (
-            <Button variant="outline" size="lg" onClick={() => setStatus("idle")}>
+            <button onClick={() => setStatus("idle")} className="px-6 py-2.5 rounded-xl bg-violet-100 text-violet-700 font-semibold text-sm border border-violet-200">
               Retry
-            </Button>
+            </button>
           )}
         </div>
       </div>

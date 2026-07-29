@@ -59,6 +59,7 @@ interface Visitor {
   timezone?: string;
   network_type?: string;
   parent_visitor_id?: string;
+  source_platform?: string;
 }
 
 interface SecEvent {
@@ -104,7 +105,8 @@ CREATE TABLE IF NOT EXISTS share_visitors (
   device_type text, os text, browser text, screen_resolution text,
   language text, timezone text, network_type text, network_speed text,
   session_start timestamptz NOT NULL DEFAULT now(), last_active timestamptz,
-  parent_visitor_id text, parent_share_id text, created_at timestamptz DEFAULT now(),
+  parent_visitor_id text, parent_share_id text, source_platform text,
+  created_at timestamptz DEFAULT now(),
   UNIQUE(share_id, visitor_id)
 );
 CREATE TABLE IF NOT EXISTS share_security_events (
@@ -308,7 +310,7 @@ const ViewerCard: React.FC<{
         }`}>
           {revoked ? <Ban className="w-5 h-5" /> : (visitor.visitor_name || 'A').charAt(0).toUpperCase()}
           {live && !revoked && (
-            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-[#080c18] animate-pulse" />
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-white dark:border-[#080c18] animate-pulse" />
           )}
         </div>
 
@@ -384,6 +386,14 @@ const ViewerCard: React.FC<{
             <GitBranch className="w-3 h-3" /> Forwarded link
           </span>
         )}
+        {visitor.source_platform && (() => {
+          const meta = PLATFORM_META[visitor.source_platform] ?? { label: visitor.source_platform, emoji: '🌐', color: 'text-slate-400' };
+          return (
+            <span className={`flex items-center gap-1 text-[10px] ${meta.color} bg-slate-900/50 rounded-lg px-2 py-1`}>
+              <span className="text-xs leading-none">{meta.emoji}</span> via {meta.label}
+            </span>
+          );
+        })()}
       </div>
 
       {/* ── Session times ── */}
@@ -600,6 +610,62 @@ const DownloadInbox: React.FC<{
   );
 };
 
+// ─── Platform Breakdown ───────────────────────────────────────────────────────
+
+const PLATFORM_META: Record<string, { label: string; emoji: string; color: string }> = {
+  whatsapp:  { label: 'WhatsApp',  emoji: '💬', color: 'text-emerald-400' },
+  telegram:  { label: 'Telegram',  emoji: '✈️',  color: 'text-sky-400'     },
+  twitter:   { label: 'X/Twitter', emoji: '𝕏',  color: 'text-slate-200'   },
+  facebook:  { label: 'Facebook',  emoji: '📘', color: 'text-blue-400'    },
+  linkedin:  { label: 'LinkedIn',  emoji: '💼', color: 'text-blue-300'    },
+  email:     { label: 'Email',     emoji: '📧', color: 'text-violet-400'  },
+  native:    { label: 'Direct',    emoji: '🔗', color: 'text-fuchsia-400' },
+};
+
+const PlatformBreakdown: React.FC<{ visitors: Visitor[] }> = ({ visitors }) => {
+  const withPlatform = visitors.filter((v) => v.source_platform);
+  if (withPlatform.length === 0) return null;
+
+  const counts: Record<string, { total: number; live: number }> = {};
+  withPlatform.forEach((v) => {
+    const p = v.source_platform!;
+    if (!counts[p]) counts[p] = { total: 0, live: 0 };
+    counts[p].total += 1;
+    if (isActive(v.last_active)) counts[p].live += 1;
+  });
+
+  return (
+    <div className="rounded-xl border border-slate-700/40 bg-slate-800/20 overflow-hidden mb-2">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-700/30">
+        <Radio className="w-3.5 h-3.5 text-fuchsia-400" />
+        <span className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest">
+          Platform Traffic
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-px bg-slate-700/20">
+        {Object.entries(counts).map(([platform, { total, live }]) => {
+          const meta = PLATFORM_META[platform] ?? { label: platform, emoji: '🌐', color: 'text-slate-400' };
+          return (
+            <div key={platform} className="flex items-center gap-2.5 px-3 py-2.5 bg-slate-900/30">
+              <span className="text-base leading-none">{meta.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <p className={`text-[11px] font-bold truncate ${meta.color}`}>{meta.label}</p>
+                <p className="text-[9px] text-slate-500">{total} view{total !== 1 ? 's' : ''}</p>
+              </div>
+              {live > 0 && (
+                <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-1.5 py-0.5 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {live} live
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── Share Section ────────────────────────────────────────────────────────────
 
 const ShareSection: React.FC<{
@@ -679,6 +745,7 @@ const ShareSection: React.FC<{
               </div>
             ) : (
               <div className="space-y-3">
+                <PlatformBreakdown visitors={data.visitors} />
                 {/* Live viewers first, then offline */}
                 {[...data.visitors]
                   .sort((a, b) => {
@@ -708,6 +775,13 @@ const ShareSection: React.FC<{
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares, onBack }) => {
+  const [isLight, setIsLight] = useState(document.documentElement.getAttribute('data-theme') === 'light');
+  useEffect(() => {
+    const c = () => setIsLight(document.documentElement.getAttribute('data-theme') === 'light');
+    const o = new MutationObserver(c);
+    o.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => o.disconnect();
+  }, []);
   const [tablesOk, setTablesOk] = useState<boolean | null>(null); // null = checking
   const [allData, setAllData] = useState<Record<string, ShareMonData>>({});
 
@@ -748,9 +822,9 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
   const pendingCount = allDlRequests.filter((r) => !r.status || r.status === 'pending').length;
 
   return (
-    <div className="min-h-screen bg-[#080c18] text-white pb-10">
+    <div className={`min-h-screen pb-10 ${isLight ? 'bg-slate-50 text-slate-900' : 'bg-[#080c18] text-white'}`}>
       {/* ── Sticky header ── */}
-      <div className="sticky top-0 z-30 bg-[#080c18]/95 backdrop-blur-md border-b border-slate-800/60 px-4 py-3">
+      <div className={`sticky top-0 z-30 backdrop-blur-md px-4 py-3 ${isLight ? 'bg-white/95 border-b border-slate-200' : 'bg-[#080c18]/95 border-b border-slate-800/60'}`}>
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="text-slate-400 hover:text-white transition-colors p-1">
             <X className="w-5 h-5" />
@@ -760,7 +834,7 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
               <Radio className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-black text-white">DNA Monitoring Center</h1>
+              <h1 className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>DNA Monitoring Center</h1>
               <p className="text-[9px] text-slate-500 font-mono uppercase tracking-widest">Real-time viewer intelligence</p>
             </div>
           </div>
@@ -798,13 +872,13 @@ export const DnaMonitorDashboard: React.FC<DnaMonitorDashboardProps> = ({ shares
           {/* ── Stats ── */}
           <div className="grid grid-cols-3 gap-2 px-4">
             {[
-              { icon: <Users className="w-4 h-4" />, label: 'Viewers', value: totalViewers, color: 'text-blue-400', border: 'border-blue-700/30', from: 'from-blue-600/15' },
-              { icon: <Radio className="w-4 h-4" />, label: 'Live Now', value: liveViewers, color: 'text-emerald-400', border: 'border-emerald-700/30', from: 'from-emerald-600/15' },
-              { icon: <AlertTriangle className="w-4 h-4" />, label: 'Alerts', value: totalAlerts, color: 'text-red-400', border: 'border-red-700/30', from: 'from-red-600/15' },
+              { icon: <Users className="w-4 h-4" />, label: 'Viewers', value: totalViewers, color: 'text-blue-400', border: isLight ? 'border-blue-200' : 'border-blue-700/30', from: isLight ? 'from-blue-50' : 'from-blue-600/15' },
+              { icon: <Radio className="w-4 h-4" />, label: 'Live Now', value: liveViewers, color: 'text-emerald-400', border: isLight ? 'border-emerald-200' : 'border-emerald-700/30', from: isLight ? 'from-emerald-50' : 'from-emerald-600/15' },
+              { icon: <AlertTriangle className="w-4 h-4" />, label: 'Alerts', value: totalAlerts, color: 'text-red-400', border: isLight ? 'border-red-200' : 'border-red-700/30', from: isLight ? 'from-red-50' : 'from-red-600/15' },
             ].map(({ icon, label, value, color, border, from }) => (
               <div key={label} className={`bg-gradient-to-br ${from} to-transparent border ${border} rounded-2xl p-3`}>
                 <div className={`${color} mb-1`}>{icon}</div>
-                <p className="text-2xl font-black text-white">{value}</p>
+                <p className={`text-2xl font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>{value}</p>
                 <p className="text-[9px] text-slate-500 uppercase tracking-wide">{label}</p>
               </div>
             ))}

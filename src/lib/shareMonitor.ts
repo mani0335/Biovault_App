@@ -72,6 +72,8 @@ export interface VisitorRecord {
   sessionStart: string;
   parentVisitorId?: string | null;
   parentShareId?: string | null;
+  /** Platform that referred this viewer — extracted from ?via= URL param */
+  sourcePlatform?: string | null;
 }
 
 export async function getPublicIp(): Promise<string | null> {
@@ -274,6 +276,7 @@ export async function logVisitorAccess(record: VisitorRecord): Promise<void> {
     last_active: record.sessionStart,
     parent_visitor_id: record.parentVisitorId ?? null,
     parent_share_id: record.parentShareId ?? null,
+    source_platform: record.sourcePlatform ?? null,
     created_at: new Date().toISOString(),
   };
 

@@ -1,112 +1,105 @@
 import { motion } from "framer-motion";
-import { ArrowLeft, Shield, LogIn, Clock } from "lucide-react";
+import { ArrowLeft, Shield, UserPlus, ScanFace, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { HexGrid } from "@/components/HexGrid";
-import { Button } from "@/components/ui/button";
-import { StatusIndicator } from "@/components/StatusIndicator";
 
 const BiometricOptions = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      <HexGrid />
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-4 md:py-8">
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-          {/* Back */}
-          <Button variant="ghost" className="mb-6 text-muted-foreground" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-4 h-4 mr-2" /> Back
-          </Button>
+    <div className="min-h-screen bg-white relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-gradient-to-bl from-amber-50/60 to-transparent rounded-full blur-3xl" />
+      </div>
 
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Shield className="w-6 h-6 text-primary" />
-              <h1 className="text-2xl font-display font-bold tracking-wider text-foreground text-glow-cyan">
-                BIOMETRIC UNRECOGNIZED
-              </h1>
+      <div className="relative z-10 flex flex-col min-h-screen px-6 py-8 max-w-md mx-auto">
+        <motion.button
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors mb-8 self-start"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm font-medium">Back</span>
+        </motion.button>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center mx-auto mb-4">
+            <Shield className="w-8 h-8 text-amber-600" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Not Recognized</h1>
+          <p className="text-sm text-slate-400 mt-1">Your biometric was not found in our system</p>
+        </motion.div>
+
+        <div className="space-y-3">
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => navigate('/register')}
+            className="w-full flex items-center gap-4 bg-violet-50 rounded-2xl px-5 py-4 border border-violet-200 text-left hover:bg-violet-100 transition-colors"
+          >
+            <div className="w-12 h-12 rounded-xl bg-violet-200 flex items-center justify-center flex-shrink-0">
+              <UserPlus className="w-6 h-6 text-violet-700" />
             </div>
-            <StatusIndicator status="warning" label="Access Options Available" />
+            <div>
+              <p className="text-sm font-bold text-slate-800">New Registration</p>
+              <p className="text-xs text-slate-400">Full biometric enrollment</p>
+            </div>
+          </motion.button>
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">or</span>
+            <div className="flex-1 h-px bg-slate-200" />
           </div>
 
-          {/* Main Content */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="glass-surface rounded-2xl p-6 md:p-8 border border-primary/20"
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => navigate('/temp-access-face')}
+            className="w-full flex items-center gap-4 bg-emerald-50 rounded-2xl px-5 py-4 border border-emerald-200 text-left hover:bg-emerald-100 transition-colors"
           >
-            <div className="text-center mb-8">
-              <div className="w-16 h-16 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">⚠️</span>
-              </div>
-              <h2 className="text-lg font-display tracking-wider text-foreground mb-2">NO MATCH FOUND</h2>
-              <p className="text-muted-foreground font-mono text-sm mb-6">
-                Your biometric data was not recognized in our system. Choose an option below to proceed.
-              </p>
+            <div className="w-12 h-12 rounded-xl bg-emerald-200 flex items-center justify-center flex-shrink-0">
+              <ScanFace className="w-6 h-6 text-emerald-700" />
             </div>
-
-            {/* Options */}
-            <div className="space-y-4">
-              {/* Register Button */}
-              <motion.div
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  variant="cyber"
-                  className="w-full py-6 h-auto flex flex-col items-start justify-start text-left hover:bg-primary/20 transition-all duration-300"
-                  onClick={() => navigate('/register')}
-                >
-                  <div className="flex items-center gap-3 w-full">
-                    <div className="w-10 h-10 rounded-full bg-primary/30 flex items-center justify-center flex-shrink-0">
-                      <LogIn className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-display font-bold text-sm tracking-wide">NEW REGISTRATION</p>
-                      <p className="text-xs text-muted-foreground font-mono"> Biometric enrollment</p>
-                    </div>
-                  </div>
-                </Button>
-              </motion.div>
-
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-border"></div>
-                <span className="text-xs text-muted-foreground font-mono">OR</span>
-                <div className="flex-1 h-px bg-border"></div>
-              </div>
-
-              {/* Temp Access Button */}
-              <motion.div
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  variant="ghost"
-                  className="w-full py-6 h-auto flex flex-col items-start justify-start text-left border-2 border-neon-green/70 bg-black/30 hover:bg-neon-green/20 hover:border-neon-green transition-all duration-300"
-                  onClick={() => navigate('/temp-access-face')}
-                >
-                  <div className="flex items-center gap-3 w-full">
-                    <div className="w-10 h-10 rounded-full bg-neon-green/20 flex items-center justify-center flex-shrink-0">
-                      <Clock className="w-5 h-5 text-neon-green" />
-                    </div>
-                    <div>
-                      <p className="font-display font-bold text-sm tracking-wide text-neon-green">TEMPORARY ACCESS</p>
-                      <p className="text-xs text-muted-foreground font-mono">Limited dashboard </p>
-                    </div>
-                  </div>
-                </Button>
-              </motion.div>
+            <div>
+              <p className="text-sm font-bold text-slate-800">Temporary Access</p>
+              <p className="text-xs text-slate-400">Face scan for limited dashboard</p>
             </div>
+          </motion.button>
 
-            {/* Info */}
-            <div className="mt-8 pt-6 border-t border-border">
-              <p className="text-xs text-muted-foreground font-mono text-center">
-                Temporary access provides restricted functionality until you complete full registration.
-              </p>
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => navigate('/temp-access')}
+            className="w-full flex items-center gap-4 bg-blue-50 rounded-2xl px-5 py-4 border border-blue-200 text-left hover:bg-blue-100 transition-colors"
+          >
+            <div className="w-12 h-12 rounded-xl bg-blue-200 flex items-center justify-center flex-shrink-0">
+              <Clock className="w-6 h-6 text-blue-700" />
             </div>
-          </motion.div>
-        </motion.div>
+            <div>
+              <p className="text-sm font-bold text-slate-800">Face Search Access</p>
+              <p className="text-xs text-slate-400">Search database with face scan</p>
+            </div>
+          </motion.button>
+        </div>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="text-center text-[11px] text-slate-400 mt-8"
+        >
+          Temporary access provides restricted functionality until you complete full registration.
+        </motion.p>
       </div>
     </div>
   );

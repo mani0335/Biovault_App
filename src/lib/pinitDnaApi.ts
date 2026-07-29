@@ -13,6 +13,7 @@
 
 const URL_KEY = 'pinit_dna_server_url';
 const DEFAULT_TIMEOUT = 15000;
+const DEFAULT_SERVER = 'https://biovault-backend-d13a.onrender.com';
 
 export interface ApiResult<T> {
   ok: boolean;
@@ -24,7 +25,7 @@ export interface ApiResult<T> {
 // ─── Config ─────────────────────────────────────────────────────────────────
 
 export function getServerUrl(): string {
-  try { return (localStorage.getItem(URL_KEY) || '').replace(/\/+$/, ''); } catch { return ''; }
+  try { return (localStorage.getItem(URL_KEY) || DEFAULT_SERVER).replace(/\/+$/, ''); } catch { return DEFAULT_SERVER; }
 }
 
 export function setServerUrl(url: string): void {

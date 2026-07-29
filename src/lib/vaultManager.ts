@@ -33,7 +33,6 @@ export function initializeVault(): VaultState {
 export function saveVaultState(vault: VaultState): void {
   try {
     localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(vault));
-    console.log("✅ Vault saved:", vault.documents.length, "documents");
   } catch (err) {
     console.error("Failed to save vault:", err);
   }

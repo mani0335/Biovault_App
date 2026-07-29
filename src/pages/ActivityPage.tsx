@@ -20,9 +20,10 @@ import {
   formatRelativeTime, getRiskLevel, getEventLabel, logActivityEvent,
   syncFromSupabase,
 } from '@/lib/activityService';
+import { getAllScanEvents, markScanEventsSeen, type ScanEvent } from '@/lib/dna/scanEventService';
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
-const C = {
+const DARK = {
   bg: '#0a0f1e',
   bgCard: 'rgba(17,24,39,0.95)',
   bgCard2: 'rgba(10,15,30,0.98)',
@@ -39,6 +40,35 @@ const C = {
   orange: '#f97316',
   blue: '#3b82f6',
 };
+const LIGHT = {
+  bg: '#f8fafc',
+  bgCard: 'rgba(255,255,255,0.95)',
+  bgCard2: 'rgba(248,250,252,0.98)',
+  border: 'rgba(139,92,246,0.15)',
+  borderBright: 'rgba(139,92,246,0.35)',
+  purple: '#7c3aed',
+  cyan: '#0891b2',
+  text: '#0f172a',
+  muted: '#94a3b8',
+  muted2: '#64748b',
+  success: '#16a34a',
+  warning: '#d97706',
+  danger: '#dc2626',
+  orange: '#ea580c',
+  blue: '#2563eb',
+};
+let C = DARK;
+function useThemeColors() {
+  const [isDark, setIsDark] = useState(document.documentElement.getAttribute('data-theme') !== 'light');
+  useEffect(() => {
+    const check = () => setIsDark(document.documentElement.getAttribute('data-theme') !== 'light');
+    const obs = new MutationObserver(check);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => obs.disconnect();
+  }, []);
+  C = isDark ? DARK : LIGHT;
+  return C;
+}
 
 // ─── Seed demo data ───────────────────────────────────────────────────────────
 
@@ -670,6 +700,7 @@ const Metric: React.FC<{ icon: React.ReactNode; label: string; color?: string }>
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const ActivityPage: React.FC = () => {
+  const C = useThemeColors();
   const userId = localStorage.getItem('biovault_userId') || 'preview-user-001';
 
   const [activeTab, setActiveTab]   = useState<TabId>('all');
@@ -681,10 +712,23 @@ const ActivityPage: React.FC = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [revoking, setRevoking]     = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
+  const [scanEvents, setScanEvents] = useState<ScanEvent[]>([]);
+  const [showAllScans, setShowAllScans] = useState(false);
 
   const loadData = useCallback(() => {
     if (!userId) return;
-    seedDemoData(userId);  // no-op if data already exists
+    // Purge old demo/seed data on first real load
+    try {
+      const raw = localStorage.getItem('pinit_activity_events_v2');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { id: string }[];
+        const real = parsed.filter((e) => !e.id.startsWith('demo_'));
+        if (real.length !== parsed.length) {
+          localStorage.setItem('pinit_activity_events_v2', JSON.stringify(real));
+        }
+      }
+    } catch { /* ignore */ }
+
     const evts  = getEventsByCategory(userId, activeTab);
     const all   = getAllShareAnalytics(userId);
     const s     = getActivityStats(userId);
@@ -702,6 +746,13 @@ const ActivityPage: React.FC = () => {
     syncFromSupabase(userId).then(() => loadData());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  // Load scan events and mark them seen when this page is viewed
+  useEffect(() => {
+    if (!userId) return;
+    getAllScanEvents(userId).then(setScanEvents).catch(() => {});
+    markScanEventsSeen(userId).catch(() => {});
+  }, [userId, lastRefresh]);
 
   useEffect(() => {
     const h = () => loadData();
@@ -806,6 +857,76 @@ const ActivityPage: React.FC = () => {
               style={{ background: 'rgba(239,68,68,0.18)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 7, padding: '4px 10px', color: '#fca5a5', cursor: 'pointer', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               Review
             </button>
+          </motion.div>
+        )}
+
+        {/* ── Scan Alerts ── */}
+        {scanEvents.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+            style={{ background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 14, padding: '12px 13px', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Zap size={15} color={C.purple} style={{ flexShrink: 0 }} />
+                <span style={{ color: C.purple, fontWeight: 800, fontSize: 13 }}>
+                  Your Images Were Scanned
+                </span>
+                <span style={{ background: '#7c3aed', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>
+                  {scanEvents.length}
+                </span>
+              </div>
+              <button onClick={() => setShowAllScans(v => !v)}
+                style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', padding: 2 }}>
+                {showAllScans ? <ChevronDown size={16} /> : <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />}
+              </button>
+            </div>
+
+            {/* Always show latest 2, expand to show all */}
+            {(showAllScans ? scanEvents : scanEvents.slice(0, 2)).map((ev) => {
+              const isSelf = ev.scanner_user_id === userId;
+              const timeAgo = formatRelativeTime(new Date(ev.scanned_at).getTime());
+              const location = [ev.scanner_city, ev.scanner_country].filter(Boolean).join(', ') || 'Unknown location';
+              const fileName = ev.file_name
+                ? ev.file_name.replace(/^enc_\d+_/, '').replace(/_pinit_dna\.png$/, '').replace(/_encrypted\.jpg$/, '')
+                : 'Unknown file';
+              return (
+                <div key={ev.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(168,85,247,0.12)' }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: isSelf ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)', border: isSelf ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Camera size={14} color={isSelf ? C.success : C.danger} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.text, fontSize: 12, fontWeight: 700, marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {isSelf ? 'You scanned your own image' : 'Someone scanned your image'}
+                    </div>
+                    <div style={{ color: C.muted2, fontSize: 11, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {fileName}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ color: C.muted, fontSize: 10, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <MapPin size={9} />{location}
+                      </span>
+                      <span style={{ color: C.muted, fontSize: 10, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <Clock size={9} />{timeAgo}
+                      </span>
+                      {ev.scanner_ip && (
+                        <span style={{ color: C.muted, fontSize: 10, display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Globe size={9} />{ev.scanner_ip}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {!ev.is_seen && (
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: C.purple, flexShrink: 0, marginTop: 5 }} />
+                  )}
+                </div>
+              );
+            })}
+
+            {!showAllScans && scanEvents.length > 2 && (
+              <button onClick={() => setShowAllScans(true)}
+                style={{ marginTop: 8, background: 'none', border: 'none', color: C.purple, cursor: 'pointer', fontSize: 12, fontWeight: 700, padding: 0 }}>
+                View all {scanEvents.length} scan events →
+              </button>
+            )}
           </motion.div>
         )}
 

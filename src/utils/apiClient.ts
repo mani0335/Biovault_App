@@ -7,14 +7,12 @@ const getToken = () => {
     // Try pinit_token first
     let token = localStorage.getItem('pinit_token') || sessionStorage.getItem('pinit_token');
     if (token) {
-      console.log('🔐 API: Using pinit_token');
       return token;
     }
     
     // Fallback to biovault_token (user authenticated via biometric)
     token = localStorage.getItem('biovault_token') || sessionStorage.getItem('biovault_token');
     if (token) {
-      console.log('🔐 API: Fallback to biovault_token for vault access');
       return token;
     }
     
@@ -90,7 +88,6 @@ export const vaultAPI = {
         ? `${BASE_URL}/vault/${assetId}/download?user_id=${encodeURIComponent(userId)}`
         : `${BASE_URL}/vault/${assetId}/download`;
       
-      console.log('📥 API Download: Requesting from', endpoint);
       
       const response = await fetch(endpoint, {
         method: 'GET',
@@ -104,7 +101,6 @@ export const vaultAPI = {
       }
       
       const blob = await response.blob();
-      console.log('✅ API Download: Got blob, size:', blob.size);
       
       // Extract filename from Content-Disposition header if available
       const contentDisposition = response.headers.get('content-disposition');
@@ -117,7 +113,6 @@ export const vaultAPI = {
       // Check if running on Capacitor (mobile)
       const { Capacitor } = await import('@capacitor/core');
       if (Capacitor.isNativePlatform()) {
-        console.log('📱 Running on Capacitor - saving image to device');
         const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem');
         
         // Convert blob to base64
@@ -129,12 +124,10 @@ export const vaultAPI = {
         }
         const base64 = window.btoa(binary);
         
-        console.log('📝 Image converted to base64, size:', base64.length);
         
         // Android 11+ scoped storage: use Documents directory
         try {
           const docPath = `PINIT_Downloads/${filename}`;
-          console.log('📁 Saving to Documents:', docPath);
           
           await Filesystem.writeFile({
             path: docPath,
@@ -143,16 +136,13 @@ export const vaultAPI = {
             recursive: true,
           });
           
-          console.log('✅ File saved to Documents successfully');
           
           try {
             const uri = await Filesystem.getUri({
               path: docPath,
               directory: Directory.Documents,
             });
-            console.log('✅ File URI:', uri.uri);
           } catch (uriErr) {
-            console.warn('⚠️ Could not get URI:', uriErr);
           }
           
           return { success: true, filename, location: 'Documents/PINIT_Downloads' };
@@ -161,7 +151,6 @@ export const vaultAPI = {
           
           // Fallback 1: Try app cache directory
           try {
-            console.log('📂 Fallback 1: Trying app cache');
             const cachePath = filename;
             
             await Filesystem.writeFile({
@@ -171,7 +160,6 @@ export const vaultAPI = {
               recursive: true,
             });
             
-            console.log('✅ Saved to app cache');
             return { success: true, filename, location: 'App Cache (Temp)' };
           } catch (cacheErr: any) {
             console.error('❌ Cache save failed:', cacheErr);
@@ -180,7 +168,6 @@ export const vaultAPI = {
         }
       } else {
         // Web browser - use standard download
-        console.log('🌐 Running on web - using standard download');
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;

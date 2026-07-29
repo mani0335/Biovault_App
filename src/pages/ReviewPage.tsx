@@ -56,7 +56,6 @@ export default function ReviewPage({
 
     try {
       // Generate PDF from images
-      console.log(`📄 Creating PDF from ${reorderedPages.length} pages...`);
       const pdfBlob = await imagesToPDF(reorderedPages, {
         fileName: pdfName,
         compression: true,
@@ -93,12 +92,6 @@ export default function ReviewPage({
         `✅ PDF saved to vault! ${reorderedPages.length} pages combined.`
       );
 
-      console.log("✅ Document saved:", {
-        id: newDocument.id,
-        fileName: newDocument.fileName,
-        encrypted: newDocument.isEncrypted,
-        size: newDocument.fileSize,
-      });
 
       // Reset and navigate
       setTimeout(() => {

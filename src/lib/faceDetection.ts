@@ -42,8 +42,8 @@ export interface FaceDetectionResult {
 }
 
 const DETECTOR_OPTIONS = new faceapi.TinyFaceDetectorOptions({
-  scoreThreshold: 0.5,
-  inputSize: 416,
+  scoreThreshold: 0.45,
+  inputSize: 320,
 });
 
 // Eye Aspect Ratio: if > 0.18 eyes are open

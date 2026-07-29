@@ -13,6 +13,7 @@ import {
   IdCard, Layers,
 } from 'lucide-react';
 import { initializeVault, addDocumentToVault, saveVaultState } from '../lib/vaultManager';
+import { showInAppNotification } from '../lib/pushNotificationService';
 import type { VaultDocument } from '../lib/vaultManager';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -173,7 +174,8 @@ function doSaveToVault(
   dataUrl: string,
   fileName: string,
   fileType: string,
-  onDocumentUploaded?: AnyCallback
+  onDocumentUploaded?: AnyCallback,
+  categoryId?: string
 ): boolean {
   try {
     const vault = initializeVault();
@@ -188,7 +190,7 @@ function doSaveToVault(
     };
     const updated = addDocumentToVault(vault, doc);
     saveVaultState(updated);
-    onDocumentUploaded?.(doc);
+    onDocumentUploaded?.({ ...doc, _source: 'identity', _categoryId: categoryId });
     return true;
   } catch {
     return false;
@@ -348,8 +350,9 @@ const DocumentItem: React.FC<DocItemProps> = ({ item, categoryId, onDocumentUplo
     if (!preview) return;
     setSaving(true);
     const ft = preview.startsWith('data:image') ? 'image' : 'document';
-    const name = fileName || `${categoryId}_${item.id}`;
-    const ok = doSaveToVault(preview, name, ft, onDocumentUploaded);
+    // Always prefix with category so vault filter matches it reliably across sessions
+    const name = `${categoryId}_${item.id}${fileName ? `_${fileName}` : ''}`;
+    const ok = doSaveToVault(preview, name, ft, onDocumentUploaded, categoryId);
     setSaving(false);
     if (ok) {
       setSaved(true);
@@ -839,6 +842,27 @@ const SecurityTab: React.FC<{ userId: string | null | undefined }> = () => {
             </div>
           </React.Fragment>
         ))}
+      </Card>
+
+      {/* Push notification test */}
+      <Card className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <Bell className="w-4 h-4 text-violet-400 shrink-0" />
+          <div>
+            <p className="text-sm text-white font-medium">Push Notifications</p>
+            <p className="text-xs text-slate-500">Test in-app banner display</p>
+          </div>
+        </div>
+        <button
+          onClick={() => showInAppNotification(
+            'PINIT DNA Scanned',
+            'Someone scanned your image — tap to view activity.',
+            { type: 'scan_event' }
+          )}
+          className="shrink-0 px-3 py-1.5 bg-violet-500/15 border border-violet-500/30 text-violet-400 text-xs font-semibold rounded-xl active:scale-95 transition-transform"
+        >
+          Test
+        </button>
       </Card>
 
       <SecurityAccordion openSection={openSection} setOpenSection={setOpenSection} id="devices" icon={Monitor} title="Device Management" sub={`${DEVICES.length} connected`}>

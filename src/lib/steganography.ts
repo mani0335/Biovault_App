@@ -108,12 +108,6 @@ export async function embedUserIdInImage(
           .padStart(32, "0");
         const totalData = lengthBinary + metadataBinary;
 
-        console.log(
-          `🔐 Steganography: Embedding metadata "${metadata}" (${totalData.length} bits) with multi-region encoding`
-        );
-        console.log(
-          `📊 Canvas: ${canvas.width}x${canvas.height}, Data length: ${data.length / 4} pixels`
-        );
 
         // Define regions for multi-region encoding
         // Each region gets a copy of the same metadata (for robustness)
@@ -147,7 +141,6 @@ export async function embedUserIdInImage(
               bitIndex++;
             }
           }
-          console.log(`  ✓ Region "${region.name}" encoded with ${Math.min(bitIndex, totalData.length - (bitIndex > totalData.length ? bitIndex - totalData.length : 0))} bits`);
         }
 
         // Put modified image data back
@@ -155,11 +148,9 @@ export async function embedUserIdInImage(
 
         // Convert back to base64 - PNG preserves alpha channel perfectly
         const encryptedImageData = canvas.toDataURL("image/png");
-        console.log(`✅ Steganography: Multi-region encoding complete (output size: ${encryptedImageData.length} bytes)`);
         
         // Verify by re-extracting to confirm metadata is present
         if (encryptedImageData) {
-          console.log("✅ Encrypted image with embedded metadata generated successfully");
         }
         
         resolve(encryptedImageData);
@@ -184,14 +175,12 @@ export async function extractUserIdFromImage(
   return new Promise((resolve) => {
     // Check if Image constructor is available
     if (typeof Image === 'undefined') {
-      console.warn('Image constructor not available for watermark extraction');
       resolve(null);
       return;
     }
     
     // Check if document and canvas are available
     if (typeof document === 'undefined' || typeof document.createElement === 'undefined') {
-      console.warn('Document or canvas not available for watermark extraction');
       resolve(null);
       return;
     }
@@ -274,26 +263,18 @@ export async function extractUserIdFromImage(
                   confidence: 0, // Will be set later
                 };
                 validRegions++;
-                console.log(
-                  `✅ Region "${region.name}": Extracted owner: ${userId}`
-                );
               }
             }
           } catch (regionErr) {
             // Region extraction failed, try next
-            console.warn(`⚠️ Region "${region.name}": Extraction failed`);
           }
         }
 
         if (extractedMetadata) {
           // Set confidence score based on how many regions had valid watermark
           extractedMetadata.confidence = validRegions;
-          console.log(
-            `✅ Steganography: Extracted metadata from ${validRegions}/5 regions`
-          );
           resolve(extractedMetadata);
         } else {
-          console.warn("⚠️ Steganography: No valid watermark found in any region");
           resolve(null);
         }
       } catch (err) {
@@ -336,9 +317,6 @@ export async function verifyImageOwnership(
     metadata.userId.toLowerCase() === expectedUserId.toLowerCase();
 
   if (isOwner) {
-    console.log(
-      `✅ Ownership Verified: Image belongs to user "${metadata?.userId}" (confidence: ${metadata?.confidence}/5)`
-    );
   }
 
   return isOwner;

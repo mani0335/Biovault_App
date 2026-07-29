@@ -1,4 +1,4 @@
-import type { OwnershipDna, OwnerRecoverySource } from './types';
+import type { OwnershipDna, OwnerRecoverySource, DeviceNetworkDna } from './types';
 import { extractSimpleWatermark } from '@/lib/simpleSteganography';
 import { findRecordByHashWithCloud, findRecordByFuzzyPHash } from './dnaRecordStore';
 import { pHashSimilarity } from '@/lib/phash';
@@ -75,7 +75,7 @@ export async function extractOwnerFromAsset(
   currentSha256?: string | null,
   currentPHash?: string | null,
   vaultDocHints?: VaultDocHint[],
-): Promise<{ ownership: OwnershipDna | null; source: OwnerRecoverySource; fuzzyPHashSimilarity?: number }> {
+): Promise<{ ownership: OwnershipDna | null; source: OwnerRecoverySource; fuzzyPHashSimilarity?: number; watermarkDevice?: DeviceNetworkDna | null }> {
   // 1. Try DNA record store lookup by exact hash (local + Supabase cloud)
   const record = await findRecordByHashWithCloud(currentSha256, currentPHash);
   if (record?.ownership) {
@@ -89,10 +89,39 @@ export async function extractOwnerFromAsset(
     if (persistent?.ownerId) {
       const { getDnaRecordWithCloud } = await import('./dnaRecordStore');
       const fullRecord = await getDnaRecordWithCloud(persistent.dnaId);
+
+      // Build a minimal DeviceNetworkDna from watermark location fields so that
+      // GPS / city / country always shows — even when Supabase is unreachable or
+      // RLS blocks cross-user reads (the most common reason location is blank).
+      const hasLocation = !!(persistent.locationStr || persistent.gpsLat != null);
+      const hasDevice = !!(persistent.deviceManufacturer || persistent.deviceModel || persistent.deviceOs);
+      const watermarkDevice: DeviceNetworkDna | null = (hasLocation || hasDevice) ? {
+        manufacturer: persistent.deviceManufacturer ?? null,
+        model: persistent.deviceModel ?? null,
+        operatingSystem: persistent.deviceOs ?? null,
+        osVersion: null,
+        platform: null,
+        browserVersion: null,
+        deviceFingerprint: null,
+        publicIp: null,
+        address: null,
+        village: null,
+        area: null,
+        road: null,
+        city: persistent.city ?? null,
+        state: persistent.state ?? null,
+        country: persistent.country ?? null,
+        timeZone: null,
+        gpsLat: persistent.gpsLat ?? null,
+        gpsLng: persistent.gpsLng ?? null,
+        capturedAt: persistent.timestamp || new Date().toISOString(),
+      } : null;
+
       if (fullRecord?.ownership) {
-        return { ownership: fullRecord.ownership, source: 'persistent-dna' };
+        return { ownership: fullRecord.ownership, source: 'persistent-dna', watermarkDevice };
       }
-      // ownerName priority: (1) embedded in pixel DNA (new format, self-contained),
+
+      // ownerName priority: (1) embedded in pixel DNA (v3 format, self-contained),
       // (2) localStorage when scanning on the owner's own device,
       // (3) undefined (shows as "Name Not Available" in UI).
       const localUserId = typeof localStorage !== 'undefined' ? localStorage.getItem('biovault_userId') : null;
@@ -100,6 +129,7 @@ export async function extractOwnerFromAsset(
       const resolvedOwnerName =
         persistent.ownerName ||
         (localUserId && localUserId === persistent.ownerId && localName ? localName : undefined);
+
       const partial: OwnershipDna = {
         pinitOwnerId: `PINIT-${persistent.ownerId.slice(0, 8).toUpperCase()}`,
         userId: persistent.ownerId,
@@ -111,7 +141,7 @@ export async function extractOwnerFromAsset(
         encryptionTimestamp: persistent.timestamp || 'Not Available',
         digitalSignature: 'Not Available',
       };
-      return { ownership: partial, source: 'persistent-dna' };
+      return { ownership: partial, source: 'persistent-dna', watermarkDevice };
     }
   } catch { /* persistent extraction failed */ }
 
@@ -148,49 +178,6 @@ export async function extractOwnerFromAsset(
       return { ownership: partial, source: 'watermark' };
     }
   } catch { /* extraction failed */ }
-
-  // 5. Match against vault document pHashes passed by the caller.
-  //    This is the fallback for shared images when Supabase has no records yet
-  //    (e.g. INSERT policy not applied) but the owner has docs in their local vault.
-  if (currentPHash && vaultDocHints?.length) {
-    let bestSim = 0;
-    let bestHint: VaultDocHint | null = null;
-    for (const hint of vaultDocHints) {
-      if (!hint.pHash) continue;
-      const sim = pHashSimilarity(currentPHash, hint.pHash);
-      if (sim !== null && sim >= 50 && sim > bestSim) {
-        bestSim = sim;
-        bestHint = hint;
-      }
-    }
-    if (bestHint) {
-      // Try to load the full DNA record for this vault doc
-      if (bestHint.dnaId) {
-        try {
-          const { getDnaRecordWithCloud } = await import('./dnaRecordStore');
-          const vaultRecord = await getDnaRecordWithCloud(bestHint.dnaId);
-          if (vaultRecord?.ownership) {
-            return { ownership: vaultRecord.ownership, source: 'perceptual-hash', fuzzyPHashSimilarity: bestSim };
-          }
-        } catch { /* silent */ }
-      }
-      // Build partial ownership from vault hint metadata
-      if (bestHint.ownerId) {
-        const partial: OwnershipDna = {
-          pinitOwnerId: `PINIT-${bestHint.ownerId.slice(0, 8).toUpperCase()}`,
-          userId: bestHint.ownerId,
-          ownerName: bestHint.ownerName ?? undefined,
-          vaultId: `vault-${bestHint.ownerId}`,
-          dnaId: bestHint.dnaId ?? 'Not Available',
-          assetUuid: 'Not Available',
-          assetVersion: 1,
-          encryptionTimestamp: 'Not Available',
-          digitalSignature: 'Not Available',
-        };
-        return { ownership: partial, source: 'perceptual-hash', fuzzyPHashSimilarity: bestSim };
-      }
-    }
-  }
 
   return { ownership: null, source: 'none' };
 }

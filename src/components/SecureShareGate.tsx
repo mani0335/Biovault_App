@@ -8,8 +8,8 @@ import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, Check, ChevronRight, Copy, Download, Eye,
-  Fingerprint, Globe, Lock, MapPin, Monitor, Phone,
-  Send, Shield, Smartphone, Tablet, User, X, Zap, Activity,
+  FileText, Fingerprint, Globe, Lock, MapPin, Monitor, Phone,
+  Play, Send, Shield, Smartphone, Tablet, User, X, Zap, Activity,
   Radio, Clock, Wifi,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -406,7 +406,9 @@ export const SecureShareGate: React.FC = () => {
       return;
     }
 
-    const parentVisitorId = new URLSearchParams(window.location.search).get('ref');
+    const params = new URLSearchParams(window.location.search);
+    const parentVisitorId = params.get('ref');
+    const sourcePlatform = params.get('via') ?? undefined;
     const parentShareId = shareRow.parent_share_id ?? null;
     const ipAddress = await getPublicIp();
 
@@ -422,6 +424,7 @@ export const SecureShareGate: React.FC = () => {
       sessionStart,
       parentVisitorId,
       parentShareId,
+      sourcePlatform,
     });
 
     logActivityEvent({
@@ -503,9 +506,13 @@ export const SecureShareGate: React.FC = () => {
 
   const contentUrl = shareRow?.vault_image_id || null;
   const nameLower = (shareRow?.image_name || '').toLowerCase();
-  const isPdf = nameLower.endsWith('.pdf') || !!contentUrl?.startsWith('data:application/pdf');
-  const isImage = !!contentUrl && contentUrl.startsWith('data:image') && !imgError && !isPdf;
-  const hasContent = isPdf || isImage;
+  const VIDEO_EXTS = ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'];
+  const isVideoFile = VIDEO_EXTS.some(ext => nameLower.endsWith(`.${ext}`));
+  const isPdfFile = nameLower.endsWith('.pdf');
+  const isPdf = isPdfFile && !!contentUrl?.startsWith('data:application/pdf');
+  const isImage = !!contentUrl && contentUrl.startsWith('data:image') && !imgError;
+  const isVideo = !!contentUrl && contentUrl.startsWith('data:video');
+  const hasContent = isPdf || isImage || isVideo;
   const nameOk = visitorName.trim().length >= 2;
   const geoOk = geoPhase === 'done' || geoPhase === 'denied';
   const canEnter = nameOk && geoOk;
@@ -982,9 +989,9 @@ export const SecureShareGate: React.FC = () => {
                 </div>
               )}
 
-              {/* Image viewer */}
+              {/* Image viewer — also handles JPEG thumbnails for video/PDF previews */}
               {isImage && contentUrl && (
-                <div className="relative flex items-center justify-center min-h-64"
+                <div className="relative flex items-center justify-center min-h-64 overflow-hidden"
                   style={{ background: 'rgba(5,10,20,0.98)' }}>
                   <img
                     src={contentUrl}
@@ -993,8 +1000,57 @@ export const SecureShareGate: React.FC = () => {
                     onError={() => setImgError(true)}
                     onContextMenu={(e) => e.preventDefault()}
                     draggable={false}
-                    style={{ WebkitUserDrag: 'none' } as React.CSSProperties}
+                    style={
+                      isVideoFile || isPdfFile
+                        ? { filter: 'blur(14px)', transform: 'scale(1.1)', WebkitUserDrag: 'none' } as React.CSSProperties
+                        : { WebkitUserDrag: 'none' } as React.CSSProperties
+                    }
                   />
+                  {(isVideoFile || isPdfFile) && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3"
+                      style={{ background: 'rgba(5,10,20,0.52)' }}>
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                        style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)' }}>
+                        {isVideoFile
+                          ? <Play className="w-6 h-6 text-purple-400" />
+                          : <FileText className="w-6 h-6 text-purple-400" />}
+                      </div>
+                      <p className="text-slate-300 text-sm font-semibold text-center px-8 leading-snug">
+                        {shareRow?.image_name || (isVideoFile ? 'Video' : 'Document')}
+                      </p>
+                      <p className="text-slate-500 text-xs">
+                        {isVideoFile ? 'Request download to view full video' : 'Request download to access document'}
+                      </p>
+                    </div>
+                  )}
+                  <Watermark name={visitorName} />
+                </div>
+              )}
+
+              {/* Video preview (blurred) */}
+              {isVideo && contentUrl && (
+                <div className="relative flex items-center justify-center overflow-hidden"
+                  style={{ background: 'rgba(5,10,20,0.98)', minHeight: 220 }}>
+                  <video
+                    src={contentUrl}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="max-w-full max-h-[55vh] object-contain"
+                    style={{ filter: 'blur(14px)', transform: 'scale(1.08)', pointerEvents: 'none' }}
+                    onContextMenu={(e) => e.preventDefault()}
+                  />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3"
+                    style={{ background: 'rgba(5,10,20,0.5)' }}>
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                      style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)' }}>
+                      <Lock className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <p className="text-slate-300 text-sm font-semibold text-center px-8 leading-snug">
+                      {shareRow?.image_name || 'Video'}
+                    </p>
+                    <p className="text-slate-500 text-xs">Request download to view full video</p>
+                  </div>
                   <Watermark name={visitorName} />
                 </div>
               )}

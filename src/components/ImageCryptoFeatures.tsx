@@ -105,35 +105,30 @@ export const ImageCryptoFeatures: React.FC<ImageCryptoFeaturesProps> = ({ userId
           try {
             assetId = generateAssetId(imageDataObj);
           } catch (e) {
-            console.warn('Asset ID generation failed, using fallback:', e);
           }
 
           // Try to get device fingerprint
           try {
             deviceId = getDeviceFingerprint();
           } catch (e) {
-            console.warn('Device fingerprint failed, using default:', e);
           }
 
           // Try to generate cert ID
           try {
             certId = generateAuthorshipCertificateId(userId, deviceId);
           } catch (e) {
-            console.warn('Cert ID generation failed:', e);
           }
 
           // Try to compute PHash
           try {
             pHash = computePHash(canvas) || 'N/A';
           } catch (e) {
-            console.warn('PHash computation failed:', e);
           }
 
           // Try to compute SHA256
           try {
             fileHash = await computeSHA256(file);
           } catch (e) {
-            console.warn('SHA256 computation failed:', e);
           }
 
           // Get metadata with timeouts
@@ -143,7 +138,6 @@ export const ImageCryptoFeatures: React.FC<ImageCryptoFeaturesProps> = ({ userId
             );
             captureTime = (await Promise.race([getCaptureTime(file), timeoutPromise])) as any;
           } catch (e) {
-            console.warn('Capture time failed:', e);
           }
 
           try {
@@ -152,7 +146,6 @@ export const ImageCryptoFeatures: React.FC<ImageCryptoFeaturesProps> = ({ userId
             );
             ipAddress = (await Promise.race([getPublicIP(), timeoutPromise])) as string;
           } catch (e) {
-            console.warn('IP fetch failed, using local:', e);
           }
 
           // Embed metadata into image
@@ -172,7 +165,6 @@ export const ImageCryptoFeatures: React.FC<ImageCryptoFeaturesProps> = ({ userId
               canvas.height
             );
           } catch (e) {
-            console.warn('Embedding failed, using original image data:', e);
           }
 
           // Create data URL from modified canvas

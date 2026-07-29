@@ -1,17 +1,13 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { ArrowLeft, Clock, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, ScanFace, CheckCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { HexGrid } from "@/components/HexGrid";
 import { FaceScanner } from "@/components/FaceScanner";
-import { Button } from "@/components/ui/button";
-import { StatusIndicator } from "@/components/StatusIndicator";
 import { appStorage } from "@/lib/storage";
 
 type Step = "face" | "success";
 
-// Generate temporary user ID
-function generateTempUserId(prefix: string = "TEMP") {
+function generateTempUserId(prefix = "TEMP") {
   return `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 }
 
@@ -21,164 +17,132 @@ const TempAccessFace = () => {
   const [hasNavigatedToDashboard, setHasNavigatedToDashboard] = useState(false);
   const [tempUserId] = useState(() => generateTempUserId());
 
-  // Save temp userId to storage immediately
   useEffect(() => {
     const saveTempUserId = async () => {
       try {
-        console.log('💾 TempAccessFace: Saving temporary userId:', tempUserId);
         await appStorage.setItem('biovault_userId', tempUserId);
-        console.log('✅ TempAccessFace: Temp userId saved to storage');
-      } catch (err) {
-        console.error('❌ TempAccessFace: Failed to save temp userId:', err);
-      }
+      } catch { /* retry on next render */ }
     };
     saveTempUserId();
   }, [tempUserId]);
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      <HexGrid />
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-4 md:py-8">
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-          {/* Back */}
-          <Button variant="ghost" className="mb-6 text-muted-foreground" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-4 h-4 mr-2" /> Back
-          </Button>
+    <div className="min-h-screen bg-white relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 left-0 w-[400px] h-[400px] bg-gradient-to-br from-emerald-50/50 to-transparent rounded-full blur-3xl" />
+      </div>
 
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Clock className="w-6 h-6 text-neon-green" />
-              <h1 className="text-2xl font-display font-bold tracking-wider text-foreground text-glow-cyan">
-                TEMPORARY ACCESS
-              </h1>
-            </div>
-            <StatusIndicator status="scanning" label="Face Verification" />
+      <div className="relative z-10 flex flex-col min-h-screen px-6 py-8 max-w-md mx-auto">
+        <motion.button
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors mb-8 self-start"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm font-medium">Back</span>
+        </motion.button>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+            <ScanFace className="w-8 h-8 text-emerald-600" />
           </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Quick Access</h1>
+          <p className="text-sm text-slate-400 mt-1">Face verification for temporary session</p>
+        </motion.div>
 
-          {/* Steps indicator */}
-          <div className="flex items-center justify-center gap-2 mb-8">
-            <div className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono border ${
-                step === "face" ? "bg-primary/20 border-primary text-primary" :
-                (step === "success") ? "bg-neon-green/20 border-neon-green text-neon-green" :
-                "bg-muted border-border text-muted-foreground"
-              }`}>
-                {(step === "success") ? "✓" : 1}
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
+        <AnimatePresence mode="wait">
           <motion.div
             key={step}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="glass-surface rounded-2xl p-6 md:p-8 border border-primary/20"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-slate-50 rounded-3xl p-6 border border-slate-100"
           >
             {step === "face" && (
               <div>
-                
+                <div className="text-center mb-4">
+                  <h2 className="text-lg font-bold text-slate-800">Verify Your Face</h2>
+                  <p className="text-xs text-slate-400 mt-1">Position your face in the frame</p>
+                </div>
                 <FaceScanner
                   mode="temp-access"
                   onSuccess={async (faceData) => {
-                    // CRITICAL: Prevent multiple navigations
-                    if (hasNavigatedToDashboard) {
-                      console.log('⚠️ Already navigating to dashboard, ignoring duplicate success');
-                      return;
-                    }
-                    
-                    // 🔐 CRITICAL FIX #4: Call backend to verify face (search all users)
+                    if (hasNavigatedToDashboard) return;
+
                     try {
                       const { verifyFaceBackend } = await import('@/lib/authService');
-                      const faceEmbedding = faceData?.embedding || [];
-                      
+                      const faceEmbedding = (faceData as { embedding?: number[] })?.embedding || [];
+
                       if (!faceEmbedding.length) {
-                        console.error('❌ No face embedding provided');
                         setStep("face");
                         return;
                       }
-                      
-                      console.log('🔍 TempAccessFace: Verifying face with backend (searching all users)...');
+
                       const result = await verifyFaceBackend(faceEmbedding, null);
-                      
+
                       if (!result.verified) {
-                        console.log('❌ Face not matched in system:', result.message);
                         setStep("face");
                         return;
                       }
-                      
-                      console.log('✅ Face authenticated! Storing temp token...');
+
                       setHasNavigatedToDashboard(true);
-                      
-                      // Store temporary token and verified userId
+
                       if (result.userId) {
                         await appStorage.setItem('biovault_userId', result.userId);
                         localStorage.setItem('biovault_userId', result.userId);
-                        console.log('💾 Verified userId stored:', result.userId);
                       }
                       if (result.token) {
                         await appStorage.setItem('biovault_token', result.token);
                         localStorage.setItem('biovault_token', result.token);
-                        console.log('💾 Temp access token stored');
                       }
                       if (result.refreshToken) {
                         await appStorage.setItem('biovault_refresh_token', result.refreshToken);
                         localStorage.setItem('biovault_refresh_token', result.refreshToken);
-                        console.log('💾 Temp refresh token stored');
                       }
-                      
+
                       setStep("success");
-                      
-                      // Wait for success animation, then navigate with restricted flag
+
                       setTimeout(() => {
-                        console.log('🚀 NAVIGATING TO DASHBOARD WITH TEMPORARY ACCESS');
-                        navigate("/dashboard", { 
+                        navigate("/dashboard", {
                           replace: true,
-                          state: { tempAccess: true, restricted: true }
+                          state: { tempAccess: true, restricted: true },
                         });
-                      }, 1500);
-                    } catch (err) {
-                      console.error('❌ Temp access verification error:', err);
-                      setHasNavigatedToDashboard(false);
+                      }, 800);
+                    } catch {
                       setStep("face");
                     }
                   }}
-                  onError={() => {
-                    console.log('❌ Face scan failed - allowing retry');
-                    // Reset navigation flag to allow retry
-                    setHasNavigatedToDashboard(false);
-                    setStep("face");
-                  }}
+                  onError={() => setStep("face")}
                 />
               </div>
             )}
 
             {step === "success" && (
-              <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="text-center py-8">
-                <div className="w-20 h-20 rounded-full bg-neon-green/10 border-2 border-neon-green flex items-center justify-center mx-auto mb-4">
-                  <span className="text-3xl">✓</span>
-                </div>
-                <h2 className="text-xl font-display tracking-wider text-neon-green mb-2">ACCESS GRANTED</h2>
-                <p className="text-muted-foreground font-mono text-sm">Redirecting to dashboard...</p>
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="text-center py-8"
+              >
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 15 }}
+                  className="w-20 h-20 rounded-full bg-emerald-100 border-2 border-emerald-400 flex items-center justify-center mx-auto mb-4"
+                >
+                  <CheckCircle className="w-10 h-10 text-emerald-500" />
+                </motion.div>
+                <h2 className="text-xl font-black text-emerald-600 mb-1">Verified</h2>
+                <p className="text-sm text-slate-400">Redirecting to your vault…</p>
+                <motion.div
+                  animate={{ width: ["0%", "100%"] }}
+                  transition={{ duration: 0.8 }}
+                  className="h-1 bg-emerald-400 rounded-full mt-6 mx-auto max-w-[200px]"
+                />
               </motion.div>
             )}
           </motion.div>
-
-          {/* Info */}
-          {step === "face" && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="mt-6 p-4 bg-neon-green/5 border border-neon-green/30 rounded-lg"
-            >
-              <p className="text-xs text-neon-green font-mono">
-                ⓘ Temporary access is limited to read-only dashboard features. Complete registration for full access.
-              </p>
-            </motion.div>
-          )}
-        </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

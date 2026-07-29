@@ -19,10 +19,12 @@ import {
   FileText,
   Upload,
   Loader2,
+  Briefcase,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { generateDmcaNotice } from '@/lib/dmca/dmcaGenerator';
+import { generateHrLegalReport } from '@/lib/dmca/hrLegalReport';
 import { runForensicScan } from '@/lib/dna/forensicIntelligence';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
@@ -55,6 +57,11 @@ interface ShareConfig {
   created_at: string;
   password: string | null;
   include_cert: boolean;
+  // Scenario 5 — TEP fields
+  is_tep?: boolean;
+  recipient_name?: string | null;
+  recipient_email?: string | null;
+  recipient_org?: string | null;
 }
 
 type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -70,7 +77,7 @@ interface SecurityAlert {
 }
 
 type ThreatLevel = 'GREEN' | 'AMBER' | 'RED';
-type Tab = 'overview' | 'alerts' | 'shares' | 'takedown';
+type Tab = 'overview' | 'alerts' | 'shares' | 'takedown' | 'enterprise';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -215,6 +222,7 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     registeredAt?: string;
   } | null>(null);
   const [scenario2Error, setScenario2Error] = useState<string | null>(null);
+  const [generatingReport, setGeneratingReport] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
@@ -261,16 +269,17 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     if (!userId) return;
     setRevoking((prev) => ({ ...prev, [shareId]: true }));
     try {
-      await (supabase as any)
+      const { error: updateErr } = await (supabase as any)
         .from('share_configs')
         .update({ is_active: false })
         .eq('user_id', userId)
         .eq('share_id', shareId);
+      if (updateErr) throw new Error(updateErr.message);
       setShares((prev) =>
         prev.map((s) => (s.share_id === shareId ? { ...s, is_active: false } : s))
       );
     } catch {
-      // silently fail — UI will show the share unchanged
+      // DB error — leave UI unchanged so user knows the revoke did not apply
     } finally {
       setRevoking((prev) => ({ ...prev, [shareId]: false }));
     }
@@ -967,6 +976,155 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     );
   };
 
+  // ── Enterprise tab (Scenario 5 — TEP) ───────────────────────────────────────
+  const renderEnterprise = () => {
+    const tepShares = shares.filter((s) => s.is_tep);
+    const handleGenerateHrReport = async (share: ShareConfig, infringingUrl?: string) => {
+      setGeneratingReport(share.share_id);
+      try {
+        const dataUri = await generateHrLegalReport({
+          recipientName: share.recipient_name ?? 'Unknown Recipient',
+          recipientEmail: share.recipient_email ?? undefined,
+          recipientOrg: share.recipient_org ?? undefined,
+          documentTitle: share.image_name ?? 'Document',
+          dnaId: share.share_id,
+          shareId: share.share_id,
+          shareLink: share.share_link ?? '',
+          createdAt: new Date(share.created_at).toLocaleString(),
+          infringingUrl,
+          reportedBy: userId ?? undefined,
+        });
+        const fileName = `PINIT_HR_Legal_${share.share_id.slice(0, 8)}.pdf`;
+        if (Capacitor.isNativePlatform()) {
+          const base64 = dataUri.split(',')[1];
+          const { Filesystem, Directory } = await import('@capacitor/filesystem');
+          await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache });
+          const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
+          await Share.share({ title: 'HR Legal Report', url: uri, dialogTitle: 'Share HR Legal Report' });
+        } else {
+          const link = document.createElement('a');
+          link.href = dataUri;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      } catch (e) {
+        console.error('HR report generation failed:', e);
+      } finally {
+        setGeneratingReport(null);
+      }
+    };
+
+    return (
+      <motion.div key="enterprise" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-4">
+        {/* Header */}
+        <div className="bg-blue-900/20 border border-blue-500/30 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Briefcase className="w-5 h-5 text-blue-400" />
+            <span className="font-bold text-white">PINIT Sentinel — Enterprise</span>
+          </div>
+          <p className="text-blue-300/70 text-xs">Tracked Export Packages (TEP) issued to named recipients. Per-recipient steganographic watermark — if a document leaks, the recipient is identified and an HR/Legal report is generated automatically.</p>
+        </div>
+
+        {tepShares.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
+            <Briefcase className="w-10 h-10 text-slate-600" />
+            <p className="text-slate-400 font-medium text-sm">No TEP shares yet</p>
+            <p className="text-slate-500 text-xs max-w-xs">When you share a document as a Tracked Export Package, it will appear here with access timeline and breach reporting.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {tepShares.map((share) => {
+              const isExpired = share.expiry_date ? new Date(share.expiry_date) < new Date() : false;
+              const isGenerating = generatingReport === share.share_id;
+              return (
+                <motion.div
+                  key={share.share_id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-slate-800/60 border border-blue-500/20 rounded-2xl p-4 space-y-3"
+                >
+                  {/* Recipient identity */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-bold text-white text-sm">{share.recipient_name ?? '—'}</p>
+                      {share.recipient_email && <p className="text-blue-300/70 text-[11px]">{share.recipient_email}</p>}
+                      {share.recipient_org && <p className="text-slate-400 text-[11px]">{share.recipient_org}</p>}
+                    </div>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                      !share.is_active || isExpired ? 'bg-slate-700 text-slate-400' : 'bg-blue-800/50 text-blue-300'
+                    }`}>
+                      {!share.is_active ? 'Revoked' : isExpired ? 'Expired' : 'Active TEP'}
+                    </span>
+                  </div>
+
+                  {/* Document info */}
+                  <div className="bg-slate-900/40 rounded-xl p-2.5 space-y-1">
+                    <p className="text-[11px] text-slate-300 font-medium truncate">{share.image_name}</p>
+                    <div className="flex gap-3 text-[10px] text-slate-500">
+                      <span>Issued {new Date(share.created_at).toLocaleDateString()}</span>
+                      {share.expiry_date && <span>Expires {new Date(share.expiry_date).toLocaleDateString()}</span>}
+                      <span>{share.access_count} access{share.access_count !== 1 ? 'es' : ''}</span>
+                    </div>
+                  </div>
+
+                  {/* TEP ID */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500 font-mono flex-1 truncate">TEP: {share.share_id}</span>
+                    <button
+                      onClick={() => navigator.clipboard?.writeText(share.share_link)}
+                      className="text-slate-400 hover:text-white transition-colors"
+                      title="Copy link"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleGenerateHrReport(share)}
+                      disabled={isGenerating}
+                      className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-xs"
+                    >
+                      {isGenerating ? (
+                        <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Generating…</>
+                      ) : (
+                        <><FileText className="w-3 h-3 mr-1" />HR/Legal Report</>
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => window.open(share.share_link, '_blank', 'noopener,noreferrer')}
+                      className="border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs"
+                      title="Open TEP link"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Sentinel info card */}
+        <div className="bg-slate-800/30 border border-slate-700/40 rounded-2xl p-4 space-y-2">
+          <p className="text-xs font-bold text-white">How TEP Breach Response Works</p>
+          <ol className="text-[11px] text-slate-400 space-y-1 list-decimal list-inside">
+            <li>Document is issued as TEP — per-recipient pixel watermark applied at Amplitude-14.</li>
+            <li>If leaked, scan the leaked copy in the Takedown tab ("Scan Stolen File").</li>
+            <li>Watermark decodes the recipient name → generate HR/Legal Report (not DMCA).</li>
+            <li>Revoke the TEP share link immediately and notify HR and Legal/Compliance.</li>
+          </ol>
+        </div>
+      </motion.div>
+    );
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
@@ -974,6 +1132,7 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
     { id: 'alerts', label: 'Alerts', icon: <AlertTriangle className="w-4 h-4" />, badge: alerts.length },
     { id: 'shares', label: 'Shares', icon: <Link2 className="w-4 h-4" /> },
     { id: 'takedown', label: 'Takedown', icon: <Globe className="w-4 h-4" /> },
+    { id: 'enterprise', label: 'Enterprise', icon: <Briefcase className="w-4 h-4" />, badge: shares.filter(s => s.is_tep).length || undefined },
   ];
 
   return (
@@ -1049,6 +1208,7 @@ const SecurityCenter: React.FC<SecurityCenterProps> = ({ userId, onBack }) => {
             {activeTab === 'alerts' && renderAlerts()}
             {activeTab === 'shares' && renderShares()}
             {activeTab === 'takedown' && renderTakedown()}
+            {activeTab === 'enterprise' && renderEnterprise()}
           </AnimatePresence>
         )}
       </div>

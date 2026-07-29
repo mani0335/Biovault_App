@@ -58,7 +58,6 @@ const Portfolio: React.FC = () => {
 
   
   const handleTrack = (portfolio: PortfolioType) => {
-    console.log('Track portfolio:', portfolio.name);
     // Implement tracking functionality
   };
 
@@ -95,7 +94,7 @@ const Portfolio: React.FC = () => {
                 onView={() => handleTrack(portfolio)}
                 onEdit={() => handleTrack(portfolio)}
                 onShare={() => handleShare(portfolio)}
-                onDelete={() => console.log('Delete not implemented')}
+                onDelete={() => {}}
               />
             ))
           ) : (

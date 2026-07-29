@@ -9,39 +9,27 @@ const PortfolioViewPage = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("=== PORTFOLIO VIEW DEBUG START ===");
-    console.log("VIEW ID from URL:", id);
-    console.log("VIEW ID type:", typeof id);
     
     if (!id) {
-      console.log("ERROR: No ID found in URL params");
       setLoading(false);
       return;
     }
     
     // Fetch portfolio from localStorage
     const rawData = localStorage.getItem("portfolios");
-    console.log("Raw localStorage data:", rawData);
     
     if (!rawData) {
-      console.log("ERROR: No portfolios found in localStorage");
       setLoading(false);
       return;
     }
     
     const data = JSON.parse(rawData);
-    console.log("Parsed portfolios array:", data);
-    console.log("Number of portfolios:", data.length);
     
     // Log each portfolio ID for debugging
     data.forEach((p: any, index: number) => {
-      console.log(`Portfolio ${index}: ID=${p.id}, Type=${typeof p.id}, Name=${p.name}`);
     });
     
     const found = data.find((p: any) => String(p.id) === String(id));
-    console.log("FOUND portfolio:", found);
-    console.log("Comparison used: String(p.id) === String(id)");
-    console.log("=== PORTFOLIO VIEW DEBUG END ===");
     
     setPortfolio(found);
     setLoading(false);

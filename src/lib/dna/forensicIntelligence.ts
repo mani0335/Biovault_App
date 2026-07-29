@@ -50,7 +50,7 @@ export async function runForensicScan(
   const hashRecord = await findRecordByHashWithCloud(currentDna.sha256, currentDna.pHash);
 
   // Step 3: Extract ownership via persistent pixel DNA (primary) or record store
-  const { ownership, source: ownerSource, fuzzyPHashSimilarity } = await extractOwnerFromAsset(
+  const { ownership, source: ownerSource, fuzzyPHashSimilarity, watermarkDevice } = await extractOwnerFromAsset(
     scannedDataUrl, currentDna.sha256, currentDna.pHash, vaultDocHints,
   );
 
@@ -284,9 +284,15 @@ export async function runForensicScan(
     })();
   }
 
+  // originalDevice: prefer cloud record (has full device + GPS), fall back to
+  // watermark-extracted location so GPS/city/country shows even when Supabase
+  // is unreachable or RLS blocks a cross-user read.
+  const cloudDevice = originalRecord?.deviceNetwork ?? null;
+  const effectiveDevice = cloudDevice ?? watermarkDevice ?? null;
+
   return {
     originalOwner: ownership,
-    originalDevice: originalRecord?.deviceNetwork ?? null,
+    originalDevice: effectiveDevice,
     custodyTimeline,
     similarityPct,
     dnaMatchPct,

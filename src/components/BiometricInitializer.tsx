@@ -14,10 +14,8 @@ export function BiometricInitializer() {
       try {
         const win: any = window;
         
-        console.log('🔐🔐🔐 [APP INIT] ========== BIOMETRIC SYSTEM INITIALIZATION ==========');
         
         // ✅ CRITICAL: Check if running in native environment
-        console.log('[APP INIT] Checking if app is running NATIVELY...');
         if (!win.Capacitor) {
           console.error('❌❌❌ CRITICAL: APP IS NOT RUNNING NATIVELY ❌❌❌');
           console.error('[APP INIT] Capacitor not detected - this means:');
@@ -32,25 +30,18 @@ export function BiometricInitializer() {
           return;
         }
         
-        console.log('✅ App is running NATIVELY - Capacitor detected');
         
         // ✅ CRITICAL: Request biometric permission from user
-        console.log('[APP INIT] Requesting biometric permission from user...');
         const permissionGranted = await requestBiometricPermission();
         
         if (permissionGranted) {
-          console.log('✅ Biometric permission granted by user');
         } else {
-          console.warn('⚠️ Biometric permission denied by user');
-          console.warn('[APP INIT] User can grant permission later in Settings');
         }
         
         // Now initialize biometric
-        console.log('[APP INIT] Initializing biometric system...');
         const result = await initializeBiometric();
         
         if (result.success) {
-          console.log('✅ Biometric system initialized successfully');
         } else {
           console.error('❌ Biometric initialization failed:', result.error);
           console.error('[APP INIT] Fingerprint authentication will NOT work');

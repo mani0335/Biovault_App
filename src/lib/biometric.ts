@@ -57,22 +57,17 @@ export async function showBiometricPrompt(options?: {
   subtitle?: string;
   description?: string;
 }): Promise<void> {
-  console.log('\n BIOMETRIC AUTHENTICATION - SIMPLIFIED APPROACH');
-  console.log('===========================================');
   
   try {
     // STEP 1: Quick availability check
-    console.log('   STEP 1: Quick biometric check...');
     const availability = await isBiometricAvailable();
     
     if (!availability.available) {
       throw new Error(availability.reason || 'Biometric not available');
     }
     
-    console.log('   Biometric available:', availability.sensorType);
     
     // STEP 2: Load plugin and use simplest method
-    console.log('   STEP 2: Using simplified biometric authentication...');
     const { NativeBiometric } = await import('@capgo/capacitor-native-biometric');
     
     if (!NativeBiometric) {
@@ -80,7 +75,6 @@ export async function showBiometricPrompt(options?: {
     }
     
     // STEP 3: Use the most basic authentication options
-    console.log('   STEP 3: Attempting basic biometric prompt...');
     
     const basicOptions = {
       reason: options?.reason || 'Authenticate to continue',
@@ -90,19 +84,15 @@ export async function showBiometricPrompt(options?: {
       // Remove all problematic options
     };
     
-    console.log('   Using basic options:', basicOptions);
     
     // SIMPLIFIED: Try only the most reliable method
     try {
-      console.log('   Trying basic biometric authentication...');
       
       // Use the simplest possible call
       const result = await NativeBiometric.verifyIdentity(basicOptions);
       
-      console.log('   Authentication result:', result);
       
       // Very simple success check - if we get here without error, it worked
-      console.log('   SUCCESS: Biometric authentication completed');
       return;
       
     } catch (error: any) {
@@ -110,11 +100,9 @@ export async function showBiometricPrompt(options?: {
       
       // If basic method fails, try with minimal options
       try {
-        console.log('   Trying with minimal options...');
         const minimalResult = await NativeBiometric.verifyIdentity({
           reason: 'Verify your fingerprint'
         });
-        console.log('   Minimal authentication SUCCESS');
         return;
       } catch (minimalError: any) {
         console.error('   Minimal authentication also failed:', minimalError.message);
@@ -122,11 +110,9 @@ export async function showBiometricPrompt(options?: {
         // FINAL ATTEMPT: Try authenticate method as fallback
         if (typeof NativeBiometric.authenticate === 'function') {
           try {
-            console.log('   Trying authenticate method as fallback...');
             const authResult = await NativeBiometric.authenticate({
               reason: 'Verify your fingerprint'
             });
-            console.log('   Authenticate method SUCCESS');
             return;
           } catch (authError: any) {
             console.error('   Authenticate method failed:', authError.message);
@@ -157,13 +143,9 @@ export async function showBiometricPrompt(options?: {
 // ✅ Initialize biometric system (Capacitor Biometric)
 export async function initializeBiometric(): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log('🔐 ========== INITIALIZING BIOMETRIC SYSTEM (CAPACITOR) ==========');
     const win: any = window;
     
     // Stage 1: Check if we're on a native platform
-    console.log('📱 Stage 1: Platform check');
-    console.log('   - window.Capacitor:', !!win.Capacitor);
-    console.log('   - document.readyState:', document.readyState);
     
     // Stage 2: Check if Capacitor is available
     if (!win.Capacitor) {
@@ -174,10 +156,8 @@ export async function initializeBiometric(): Promise<{ success: boolean; error?:
       };
     }
     
-    console.log('✅ Stage 2: Capacitor is available');
     
     // Stage 3: Load Capacitor Biometric plugin
-    console.log('🔍 Stage 3: Loading Capacitor Biometric plugin...');
     try {
       const { NativeBiometric } = await import('@capgo/capacitor-native-biometric');
       
@@ -185,18 +165,13 @@ export async function initializeBiometric(): Promise<{ success: boolean; error?:
         throw new Error('Biometric plugin not available');
       }
       
-      console.log('✅ Capacitor Biometric plugin loaded successfully');
       
       // Stage 4: Check if biometric is available
-      console.log('🧪 Stage 4: Checking if biometric is available on device...');
       const result = await NativeBiometric.isAvailable();
       
       if (result.isAvailable) {
-        console.log('✅ Biometric is available on device');
-        console.log('   Biometric type:', result.biometryType);
         return { success: true };
       } else {
-        console.warn('⚠️ Biometric hardware not available on this device');
         return { 
           success: false, 
           error: 'Biometric hardware not available on this device' 
@@ -229,10 +204,8 @@ export async function requestBiometricPermission(): Promise<boolean> {
   try {
     const win: any = window;
     
-    console.log('📋 [PERMISSIONS] Requesting biometric permissions...');
     
     if (!win.Capacitor) {
-      console.warn('⚠️ Not running in Capacitor environment - skipping permission request');
       return true;
     }
     
@@ -240,10 +213,8 @@ export async function requestBiometricPermission(): Promise<boolean> {
     try {
       const { NativeBiometric } = await import('@capgo/capacitor-native-biometric');
       const available = await NativeBiometric.isAvailable();
-      console.log('✅ [PERMISSIONS] Biometric availability:', available.isAvailable);
       return available.isAvailable;
     } catch (permErr: any) {
-      console.warn('⚠️ [PERMISSIONS] Permission check error:', permErr?.message);
       // Android handles permissions via manifest — return true to let the OS prompt
       return true;
     }

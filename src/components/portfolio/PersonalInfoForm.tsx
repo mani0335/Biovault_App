@@ -18,7 +18,6 @@ const PersonalInfoForm = React.memo(({ data, onChange }: PersonalInfoFormProps) 
     onChange(field, value);
   }, [onChange]);
 
-  console.log("PersonalInfoForm render"); // Debug log
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-4 mb-4">

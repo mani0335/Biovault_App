@@ -35,7 +35,6 @@ const PortfolioFlowPreviewPage = () => {
 
   useEffect(() => {
     if (!hasRequiredData && !draft) {
-      console.warn("Portfolio preview missing required data:", location.state);
     }
   }, [hasRequiredData, draft, location.state]);
 

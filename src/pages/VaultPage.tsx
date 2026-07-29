@@ -50,7 +50,6 @@ export default function VaultPage({ onBack }: VaultPageProps) {
     const vault = initializeVault();
     const docs = getAllDocuments(vault);
     setDocuments(docs);
-    console.log(`📦 Loaded ${docs.length} documents from vault`);
   }, []);
 
   // Safe helper — handles both 'fileName' (vaultManager) and legacy 'name' field
@@ -152,7 +151,6 @@ export default function VaultPage({ onBack }: VaultPageProps) {
       if (doc.isEncrypted && doc.encryptionKey) {
         const decrypted = decryptFile(doc.fileData, doc.encryptionKey);
         setDecryptedContent(decrypted);
-        console.log("✅ Document decrypted");
       } else {
         setDecryptedContent(doc.fileData);
       }

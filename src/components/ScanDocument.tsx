@@ -52,7 +52,6 @@ export default function ScanDocument({ onBack }: { onBack: () => void }) {
           stream = await navigator.mediaDevices.getUserMedia(constraints);
           break;
         } catch (err) {
-          console.warn("Constraint failed, trying next...", err);
         }
       }
 
@@ -66,7 +65,6 @@ export default function ScanDocument({ onBack }: { onBack: () => void }) {
         const playVideo = () => {
           try {
             videoRef.current?.play().catch((playErr) => {
-              console.warn("Video play failed:", playErr);
               setError("Could not play camera stream");
             });
             setIsCameraReady(true);

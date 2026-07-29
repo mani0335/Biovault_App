@@ -42,7 +42,6 @@ export async function calculatePageCount(file: File): Promise<number> {
     if (catalogMatch) {
       const n = parseInt(catalogMatch[1], 10);
       if (n > 0 && n <= 9999) {
-        console.log(`✅ PDF page count from /N: ${n}`);
         return n;
       }
     }
@@ -51,14 +50,11 @@ export async function calculatePageCount(file: File): Promise<number> {
     // Use a regex that avoids matching /Pages (the parent node type)
     const pageMatches = text.match(/\/Type\s*\/Page[^s]/g);
     if (pageMatches && pageMatches.length > 0) {
-      console.log(`✅ PDF page count from /Type /Page scan: ${pageMatches.length}`);
       return pageMatches.length;
     }
 
-    console.warn('⚠️ Could not parse PDF page count, defaulting to 1');
     return 1;
   } catch (err) {
-    console.warn('⚠️ PDF page count error:', err);
     return 1;
   }
 }
@@ -100,7 +96,6 @@ const getVaultStorageKey = (userId: string): string => `pinit_vault_documents_${
  */
 export async function loadVaultDocuments(userId: string): Promise<VaultDocument[]> {
   if (!userId) {
-    console.warn("⚠️ No userId provided, cannot load vault");
     return [];
   }
 
@@ -119,13 +114,15 @@ export async function loadVaultDocuments(userId: string): Promise<VaultDocument[
     if (response.ok) {
       const data = await response.json();
       if (data.documents && Array.isArray(data.documents)) {
-        console.log(`✅ Loaded vault from backend for user: ${userId}`);
-        // Convert backend format to VaultDocument format
+        // Convert backend format to VaultDocument format.
+        // image_base64 holds the persistent-DNA-embedded image (what was sent as
+        // encryptedImage on save) — map it back to encryptedImage so scanning
+        // continues to find the embedded ownership DNA after a backend reload.
         const documents = data.documents.map((doc: any) => ({
           id: doc.asset_id || doc.id,
           name: doc.file_name,
-          encryptedData: doc.image_base64 || doc.thumbnail_base64,
-          encryptedImage: doc.thumbnail_base64,
+          encryptedData: doc.image_base64,
+          encryptedImage: doc.image_base64,
           cloudinaryUrl: doc.image_url || doc.thumbnail_url,
           metadata: {
             timestamp: new Date(doc.capture_timestamp).getTime(),
@@ -141,7 +138,6 @@ export async function loadVaultDocuments(userId: string): Promise<VaultDocument[
       }
     }
   } catch (e) {
-    console.log("Backend vault load failed, trying localStorage:", e);
   }
 
   // Fallback to localStorage
@@ -151,19 +147,16 @@ export async function loadVaultDocuments(userId: string): Promise<VaultDocument[
     // Try appStorage first (Capacitor)
     const stored = await appStorage.getItem(VAULT_STORAGE_KEY);
     if (stored) {
-      console.log(`✅ Loaded vault from appStorage for user: ${userId}`);
       const documents = JSON.parse(stored) as VaultDocument[];
       return await validateDocumentsForUser(userId, documents);
     }
   } catch (e) {
-    console.log("appStorage unavailable, trying localStorage");
   }
 
   // Fallback to localStorage
   try {
     const stored = localStorage.getItem(VAULT_STORAGE_KEY);
     if (stored) {
-      console.log(`✅ Loaded vault from localStorage for user: ${userId}`);
       const documents = JSON.parse(stored) as VaultDocument[];
       return await validateDocumentsForUser(userId, documents);
     }
@@ -206,8 +199,10 @@ export async function saveVaultDocuments(
               user_id: userId,
               asset_id: doc.id,
               file_name: doc.name,
-              image_base64: doc.encryptedData,
-              thumbnail_base64: doc.encryptedData?.substring(0, 1000), // First 1000 chars as thumbnail
+              // image_base64 must carry the persistent-DNA-embedded image (encryptedImage),
+              // not the raw pre-watermark encryptedData — otherwise the backend round-trip
+              // silently strips the embedded ownership DNA from every saved document.
+              image_base64: doc.encryptedImage || doc.encryptedData,
               metadata: {
                 ...doc.metadata,
                 original_name: doc.name,
@@ -220,23 +215,18 @@ export async function saveVaultDocuments(
           });
 
           if (response.ok) {
-            console.log(`✅ Document saved to backend: ${doc.name}`);
           } else {
-            console.warn(`⚠️ Failed to save ${doc.name} to backend:`, response.statusText);
           }
         } catch (error) {
-          console.warn(`⚠️ Error saving ${doc.name} to backend:`, error);
         }
       }
     }
   } catch (error) {
-    console.warn("⚠️ Backend save failed, using local storage only:", error);
   }
 
   // Also save to localStorage as fallback
   try {
     localStorage.setItem(VAULT_STORAGE_KEY, data);
-    console.log(`✅ Vault saved to localStorage for user: ${userId}`);
   } catch (e) {
     console.error("Failed to save to localStorage:", e);
   }
@@ -244,7 +234,6 @@ export async function saveVaultDocuments(
   // Save to appStorage (Capacitor)
   try {
     await appStorage.setItem(VAULT_STORAGE_KEY, data);
-    console.log(`✅ Vault saved to appStorage for user: ${userId}`);
   } catch (e) {
     console.error("Failed to save to appStorage:", e);
   }
@@ -255,7 +244,6 @@ export async function saveVaultDocuments(
  */
 export async function clearVaultForUser(userId: string): Promise<void> {
   if (!userId) {
-    console.warn("⚠️ No userId provided, cannot clear vault");
     return;
   }
 
@@ -264,7 +252,6 @@ export async function clearVaultForUser(userId: string): Promise<void> {
   // Clear from localStorage
   try {
     localStorage.removeItem(VAULT_STORAGE_KEY);
-    console.log(`✅ Vault cleared from localStorage for user: ${userId}`);
   } catch (e) {
     console.error("Failed to clear vault from localStorage:", e);
   }
@@ -272,7 +259,6 @@ export async function clearVaultForUser(userId: string): Promise<void> {
   // Clear from appStorage (Capacitor)
   try {
     await appStorage.removeItem(VAULT_STORAGE_KEY);
-    console.log(`✅ Vault cleared from appStorage for user: ${userId}`);
   } catch (e) {
     console.error("Failed to clear vault from appStorage:", e);
   }
@@ -313,7 +299,6 @@ export async function uploadImageToCloudinary(
     });
 
     const result = await response.json();
-    console.log("✅ Cloudinary upload response:", result);
 
     if (response.ok && result.image_url) {
       return {
@@ -322,7 +307,6 @@ export async function uploadImageToCloudinary(
       };
     } else {
       // Even if Cloudinary fails, we can still store locally
-      console.warn("⚠️ Cloudinary upload failed, will use local storage");
       return {
         success: false,
         error: result.detail || "Cloudinary upload failed",
@@ -371,25 +355,18 @@ export async function validateDocumentsForUser(
   documents: VaultDocument[]
 ): Promise<VaultDocument[]> {
   if (!userId) {
-    console.warn("⚠️ No userId provided, cannot validate documents");
     return [];
   }
 
   const validated = documents.filter((doc) => {
     const docOwnerId = doc.metadata?.ownerId;
     if (docOwnerId && docOwnerId !== userId) {
-      console.warn(
-        `⚠️ Skipping document '${doc.name}' - belongs to user: ${docOwnerId}, not ${userId}`
-      );
       return false;
     }
     return true;
   });
 
   if (validated.length < documents.length) {
-    console.log(
-      `✅ Filtered ${documents.length - validated.length} documents that don't belong to this user`
-    );
   }
 
   return validated;
@@ -429,7 +406,6 @@ export async function getVaultMetadata(
       vaultData = appStorageData;
     }
   } catch (e) {
-    console.log("appStorage unavailable for metadata check");
   }
 
   // Check localStorage
@@ -444,7 +420,6 @@ export async function getVaultMetadata(
       if (!vaultData) vaultData = localStorageData;
     }
   } catch (e) {
-    console.log("localStorage unavailable for metadata check");
   }
 
   let userVaultSize = 0;
@@ -479,7 +454,6 @@ export async function saveImageToGallery(
   _userId: string
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   try {
-    console.log("📷 Saving to device via share sheet...");
 
     // Strip data URI prefix to get raw base64
     const cleanBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
@@ -496,7 +470,6 @@ export async function saveImageToGallery(
       recursive: true,
     });
 
-    console.log(`✅ Temp file written: ${written.uri}`);
 
     // Open Android share sheet → user can tap "Save to Files", "Downloads", "Google Drive", etc.
     await Share.share({
@@ -546,7 +519,6 @@ export async function syncVaultMetadata(userId: string): Promise<void> {
     await appStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(validatedDocs));
     localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(validatedDocs));
 
-    console.log(`✅ Vault metadata synced for user: ${userId}`);
   } catch (e) {
     console.error("Failed to sync vault metadata:", e);
   }
@@ -558,7 +530,6 @@ export async function syncVaultMetadata(userId: string): Promise<void> {
  */
 export async function syncVaultData(userId: string): Promise<boolean> {
   if (!userId) {
-    console.warn("⚠️ No userId provided, cannot sync vault data");
     return false;
   }
 
@@ -573,7 +544,6 @@ export async function syncVaultData(userId: string): Promise<boolean> {
       primaryData = await appStorage.getItem(VAULT_STORAGE_KEY);
       if (primaryData) fromAppStorage = true;
     } catch (e) {
-      console.log("appStorage not available, using localStorage as primary");
     }
 
     if (!primaryData) {
@@ -586,7 +556,6 @@ export async function syncVaultData(userId: string): Promise<boolean> {
     }
 
     if (!primaryData) {
-      console.log("No vault data to sync");
       return true;
     }
 
@@ -597,7 +566,6 @@ export async function syncVaultData(userId: string): Promise<boolean> {
     if (!fromAppStorage) {
       try {
         await appStorage.setItem(VAULT_STORAGE_KEY, primaryData);
-        console.log(`✅ Synced vault data from localStorage to appStorage for user: ${userId}`);
       } catch (e) {
         console.error("Failed to sync to appStorage:", e);
       }
@@ -606,7 +574,6 @@ export async function syncVaultData(userId: string): Promise<boolean> {
     try {
       localStorage.setItem(VAULT_STORAGE_KEY, primaryData);
       if (fromAppStorage) {
-        console.log(`✅ Synced vault data from appStorage to localStorage for user: ${userId}`);
       }
     } catch (e) {
       console.error("Failed to sync to localStorage:", e);

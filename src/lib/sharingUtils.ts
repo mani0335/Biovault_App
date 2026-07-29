@@ -192,7 +192,6 @@ export const saveCertificate = (analysisReport: any, imageData: string): ShareCe
       })
     );
 
-    console.log('✅ Certificate generated:', certificate.certificateId);
 
     return certificate;
   } catch (error) {
@@ -285,7 +284,6 @@ export const createShareLink = (
     })
   );
 
-  console.log('✅ Share link created:', shareToken);
   return link;
 };
 

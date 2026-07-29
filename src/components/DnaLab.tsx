@@ -540,7 +540,7 @@ export const DnaLabPage: React.FC<DnaLabProps> = ({ documents, userId, onBack, s
   const [showFullMonitor, setShowFullMonitor] = useState(false);
   // Cloud (PINIT-DNA server) UI is parked until a public server is hosted.
   // Flip to true to re-enable the server panel + FAISS search + web crawler.
-  const CLOUD_ENABLED = false;
+  const CLOUD_ENABLED = true;
 
   const [tab, setTab] = useState<Tab>('monitor');
   const [busy, setBusy] = useState(false);
@@ -738,30 +738,82 @@ export const DnaLabPage: React.FC<DnaLabProps> = ({ documents, userId, onBack, s
       {/* Header */}
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="p-2 rounded-lg bg-slate-800/60 hover:bg-slate-700"><ArrowLeft className="w-5 h-5 text-slate-300" /></button>
-        <div className="flex items-center gap-2">
-          <Fingerprint className="w-6 h-6 text-pink-400" />
-          <div>
-            <h1 className="text-lg font-bold text-white leading-tight">DNA Lab</h1>
-            <p className="text-[10px] text-slate-400">On-device semantic search · difference engine · monitoring</p>
-          </div>
+        <div className="flex-1">
+          <h1 className="text-lg font-bold text-white leading-tight">DNA Lab</h1>
+          <p className="text-[10px] text-slate-400">Monitoring · Search · Compare · Report</p>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        {TABS.map((t) => {
-          const Icon = t.icon; const active = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => { setTab(t.id); setStatus(''); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
-                active ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white' : 'bg-slate-800/60 text-slate-300'}`}>
-              <Icon className="w-3.5 h-3.5" /> {t.label}
-            </button>
-          );
-        })}
+      {/* ── DNA Monitoring Center — HERO ── */}
+      <motion.button
+        whileTap={{ scale: 0.98 }}
+        onClick={() => setShowFullMonitor(true)}
+        className="w-full relative overflow-hidden rounded-2xl"
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-600 via-violet-600 to-cyan-600 opacity-90" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
+        <div className="relative px-5 py-5 text-left">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center">
+                <Radio className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <p className="text-base font-black text-white tracking-tight">DNA Monitor</p>
+                <p className="text-[10px] text-white/60">Real-time viewer intelligence</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-white bg-white/15 backdrop-blur-sm border border-white/20 rounded-full px-3 py-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE
+            </div>
+          </div>
+
+          {/* Stats row */}
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { label: 'Shares', value: shares.filter((s) => !s.expiryDate || new Date(s.expiryDate) >= new Date()).length, color: 'text-cyan-300' },
+              { label: 'Active', value: shares.length, color: 'text-emerald-300' },
+              { label: 'Forwards', value: '—', color: 'text-amber-300' },
+              { label: 'Alerts', value: 0, color: 'text-red-300' },
+            ].map((s) => (
+              <div key={s.label} className="bg-white/10 backdrop-blur-sm rounded-xl px-2 py-2.5 text-center">
+                <p className={`text-lg font-black ${s.color}`}>{s.value}</p>
+                <p className="text-[9px] text-white/50 uppercase tracking-wider font-semibold">{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-white/40 text-center mt-3">Tap to open full monitoring dashboard →</p>
+        </div>
+      </motion.button>
+
+      {/* Quick share activity */}
+      {shares.length === 0 && (
+        <div className="rounded-xl border border-slate-700/40 bg-slate-800/20 p-5 text-center">
+          <Activity className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+          <p className="text-sm font-semibold text-slate-400">No shares yet</p>
+          <p className="text-[10px] text-slate-600 mt-1">Create a share link from the Share page to see live tracking here.</p>
+        </div>
+      )}
+
+      {/* Tools tabs — secondary row */}
+      <div>
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mb-2">DNA Tools</p>
+        <div className="flex gap-2">
+          {TABS.filter(t => t.id !== 'monitor').map((t) => {
+            const Icon = t.icon; const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => { setTab(t.id); setStatus(''); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                  active ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-900/40' : 'bg-slate-800/60 text-slate-400 hover:text-white'}`}>
+                <Icon className="w-3.5 h-3.5" /> {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Cloud server panel — enables web crawl + FAISS when configured */}
       {CLOUD_ENABLED && (
       <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 space-y-2">
         <div className="flex items-center gap-2">
@@ -783,60 +835,29 @@ export const DnaLabPage: React.FC<DnaLabProps> = ({ documents, userId, onBack, s
             {connecting ? '…' : 'Connect'}
           </button>
         </div>
-        <p className="text-[9px] text-slate-500">Hosts FAISS semantic search + web-crawl monitoring. Leave blank to stay fully on-device.</p>
       </div>
-      )}
-
-      {usable.length === 0 && (
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4 text-center text-sm text-slate-400">
-          No DNA-ready items in your vault yet. Generate DNA from a file first.
-        </div>
       )}
 
       {busy && (
         <div className="flex items-center gap-2 text-xs text-purple-300"><Loader2 className="w-4 h-4 animate-spin" /> {status || 'Working…'}</div>
       )}
 
-      {/* ── Monitoring ── */}
+      {/* ── Monitoring tab (shares list) ── */}
       {tab === 'monitor' && (
-        <div className="space-y-3">
-          {/* Full Monitoring Center launcher */}
-          <motion.button
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setShowFullMonitor(true)}
-            className="w-full relative overflow-hidden rounded-2xl p-[1.5px] bg-gradient-to-r from-fuchsia-600 via-violet-600 to-cyan-600"
-          >
-            <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 px-4 py-3.5 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-600 to-violet-700 flex items-center justify-center flex-shrink-0">
-                <Radio className="w-5 h-5 text-white" />
-              </div>
-              <div className="text-left flex-1">
-                <p className="text-sm font-bold text-white">DNA Monitoring Center</p>
-                <p className="text-[10px] text-slate-400">Real-time viewer intelligence · Live locations · Activity logs</p>
-              </div>
-              <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5 flex-shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                LIVE
-              </div>
-            </div>
-          </motion.button>
-
-          <ShareMonitorDashboard
-            shares={shares}
-            documents={documents}
-            usable={usable}
-            dupes={dupes}
-            busy={busy}
-            runMonitorScan={runMonitorScan}
-            CLOUD_ENABLED={CLOUD_ENABLED}
-            connected={connected}
-            enrolling={enrolling}
-            enrollAllForMonitoring={enrollAllForMonitoring}
-            loadAlerts={loadAlerts}
-            alerts={alerts}
-          />
-        </div>
+        <ShareMonitorDashboard
+          shares={shares}
+          documents={documents}
+          usable={usable}
+          dupes={dupes}
+          busy={busy}
+          runMonitorScan={runMonitorScan}
+          CLOUD_ENABLED={CLOUD_ENABLED}
+          connected={connected}
+          enrolling={enrolling}
+          enrollAllForMonitoring={enrollAllForMonitoring}
+          loadAlerts={loadAlerts}
+          alerts={alerts}
+        />
       )}
 
       {/* ── Find Similar (Semantic Search) ── */}

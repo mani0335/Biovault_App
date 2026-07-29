@@ -8,7 +8,6 @@ const SelectFromVault = () => {
   const selectedType = location.state?.type;
   const { setSelectedDoc } = useDocument();
 
-  console.log("Selected Type:", selectedType); // Debug logging
 
   const documents = JSON.parse(localStorage.getItem("vaultDocuments") || "[]");
 
@@ -22,7 +21,6 @@ const SelectFromVault = () => {
     // Get document type from navigation state
     const documentType = selectedType || mapDocumentToField(doc.name);
     
-    console.log("SELECTING DOCUMENT:", { file: doc, type: documentType }); // Debug logging
     
     // Set selected document in global state
     setSelectedDoc({ 

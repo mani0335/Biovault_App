@@ -26,6 +26,7 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
   let y = margin;
 
   const heading = (text: string, size = 13) => {
+    checkPage(size + 30);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(size);
     doc.setTextColor(80, 20, 160);
@@ -40,6 +41,15 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
     const lines = doc.splitTextToSize(text, contentW);
     doc.text(lines, margin, y);
     y += (lines.length * (size + 3)) + 4;
+  };
+
+  const pageH = doc.internal.pageSize.getHeight();
+
+  const checkPage = (needed = 60) => {
+    if (y + needed > pageH - 40) {
+      doc.addPage();
+      y = margin;
+    }
   };
 
   const rule = () => {
@@ -238,7 +248,6 @@ export async function generateDmcaNotice(data: DmcaNoticeData): Promise<string> 
   doc.text(`Date: ${new Date().toLocaleDateString()}`, margin, y);
 
   // ── Footer ───────────────────────────────────────────────────────────────
-  const pageH = doc.internal.pageSize.getHeight();
   doc.setFillColor(245, 240, 255);
   doc.rect(0, pageH - 32, W, 32, 'F');
   doc.setFontSize(8);

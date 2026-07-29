@@ -10,7 +10,7 @@ import os
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
-from .routers import auth, vault, compare, admin, certificates, sharing, profile, portfolio
+from .routers import auth, vault, compare, admin, certificates, sharing, profile, portfolio, pinit_dna
 
 app = FastAPI(
     title       = "PINIT API",
@@ -50,6 +50,7 @@ app.include_router(certificates.router, prefix="/certificates")
 app.include_router(sharing.router, prefix="/share")
 app.include_router(profile.router, prefix="/profile")
 app.include_router(portfolio.router, prefix="/portfolio")
+app.include_router(pinit_dna.router, prefix="/api/v1")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

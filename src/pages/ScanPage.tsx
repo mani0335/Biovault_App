@@ -39,7 +39,6 @@ export default function ScanPage() {
           timestamp: Date.now(),
         };
         setScannedPages((prev) => [...prev, newPage]);
-        console.log(`✅ Page ${scannedPages.length + 1} captured`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to capture photo");

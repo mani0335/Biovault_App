@@ -6,7 +6,6 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
  */
 export async function ensurePINITVaultFolder(): Promise<{ success: boolean; folderPath?: string; error?: string }> {
   try {
-    console.log("📁 Checking for PINIT Vault folder...");
     
     // Try to access the folder first
     try {
@@ -14,12 +13,10 @@ export async function ensurePINITVaultFolder(): Promise<{ success: boolean; fold
         path: "PINIT Vault",
         directory: Directory.Documents,
       });
-      console.log("✅ PINIT Vault folder exists");
       return { success: true, folderPath: "PINIT Vault" };
     } catch (err: any) {
       // Folder doesn't exist, create it
       if (err.message?.includes("not found") || err.code === "ENOENT") {
-        console.log("📁 Creating PINIT Vault folder...");
         
         try {
           await Filesystem.mkdir({
@@ -27,7 +24,6 @@ export async function ensurePINITVaultFolder(): Promise<{ success: boolean; fold
             directory: Directory.Documents,
             recursive: true,
           });
-          console.log("✅ PINIT Vault folder created successfully");
           return { success: true, folderPath: "PINIT Vault" };
         } catch (mkdirErr) {
           console.error("❌ Failed to create folder:", mkdirErr);
@@ -71,14 +67,12 @@ export async function saveImageToPINITVault(
       : base64Data;
 
     // Write file
-    console.log(`💾 Writing file: ${filePath}`);
     const result = await Filesystem.writeFile({
       path: filePath,
       directory: Directory.Documents,
       data: cleanBase64,
     });
 
-    console.log(`✅ Image saved: ${filePath}`);
     return { success: true, filePath };
   } catch (error) {
     console.error("❌ Save error:", error);

@@ -174,9 +174,6 @@ export async function embedAdvancedWatermark(
         ctx.putImageData(imageData, 0, 0);
         const watermarkedBase64 = canvas.toDataURL('image/png');
 
-        console.log(
-          `✅ Advanced Steganography: Embedded CRC-validated "${userId}" with tile-based robustness`
-        );
         resolve(watermarkedBase64);
       } catch (err) {
         console.error('❌ Advanced steganography embedding failed:', err);
@@ -201,7 +198,6 @@ export async function extractAdvancedWatermark(
   return new Promise((resolve) => {
     // Check if Image constructor is available
     if (typeof Image === 'undefined') {
-      console.warn('Image constructor not available for advanced watermark extraction');
       resolve(null);
       return;
     }
@@ -251,7 +247,6 @@ export async function extractAdvancedWatermark(
         let uid = decodeWithOffset(0, 0);
         if (uid) {
           const result = buildResultFromExtraction(uid, data, imgW);
-          console.log(`✅ Extracted userId: "${uid}" (Confidence: ${result.confidence})`);
           resolve(result);
           return;
         }
@@ -263,9 +258,6 @@ export async function extractAdvancedWatermark(
             uid = decodeWithOffset(ox, oy);
             if (uid) {
               const result = buildResultFromExtraction(uid, data, imgW);
-              console.log(
-                `✅ Extracted userId: "${uid}" at offset (${ox},${oy}) (Confidence: ${result.confidence})`
-              );
               resolve(result);
               return;
             }
@@ -279,7 +271,6 @@ export async function extractAdvancedWatermark(
 
         const r2 = extractIMGCRYPT3(bBits);
         if (r2) {
-          console.log(`✅ Extracted full IMGCRYPT3 metadata: "${r2.userId}"`);
           resolve(r2);
           return;
         }
@@ -292,12 +283,10 @@ export async function extractAdvancedWatermark(
 
         const r3 = extractIMGCRYPT3(rgbBits);
         if (r3) {
-          console.log(`✅ Extracted legacy RGB metadata: "${r3.userId}"`);
           resolve(r3);
           return;
         }
 
-        console.warn('⚠️ No watermark found in any channel');
         resolve(null);
       } catch (err) {
         console.error('❌ Advanced steganography extraction failed:', err);

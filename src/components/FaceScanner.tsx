@@ -68,15 +68,22 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
         // Allow camera to continue even if model fails to load
         setModelReady(false);
       }
-    } catch (err: any) {
-      setStatus("error");
-      const errorMsg = err?.message || err?.name || "";
-      if (errorMsg.includes("Permission") || errorMsg.includes("permission") || errorMsg.includes("NotAllowed")) {
-        setMessage("❌ Camera permission denied. Please enable camera in app settings and retry.");
-        onError?.("Camera permission denied");
+    } catch (err: unknown) {
+      const errorMsg = (err as { message?: string; name?: string })?.message || (err as { name?: string })?.name || "";
+      const isPermDenied = errorMsg.includes("Permission") || errorMsg.includes("permission") || errorMsg.includes("NotAllowed");
+      const isCapacitor = !!(window as unknown as { Capacitor?: unknown }).Capacitor;
+
+      if (isCapacitor) {
+        setStatus("error");
+        setMessage(isPermDenied
+          ? "Camera permission denied. Please allow camera access in your device settings."
+          : "Camera unavailable. Please check device settings.");
+        onError?.(isPermDenied ? "Camera permission denied" : "Camera access failed");
       } else {
-        setMessage("❌ Camera access failed. Please check device settings and retry.");
-        onError?.("Camera access failed");
+        setStatus("idle");
+        setMessage(isPermDenied
+          ? "Camera blocked by browser. Click below to allow access, or use the phone app for best experience."
+          : "Camera not available in this browser. Install the PINIT Vault app for full biometric support.");
       }
       setTimeout(() => setStatus("idle"), 3500);
     }
@@ -99,7 +106,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
   useEffect(() => {
     if (mode === "register" && status === "camera" && cameraReady && modelReady && !hasAutoStarted.current) {
       hasAutoStarted.current = true;
-      console.log('🚀 FaceScanner: Auto-starting scan in register mode');
       // Delay slightly to ensure everything is ready
       setTimeout(() => {
         if (scanRef.current) {
@@ -129,7 +135,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
 
     // FOR REGISTRATION: Properly detect face presence first
     if (mode === "register") {
-      console.log('🔍 REGISTRATION MODE: Starting proper face detection...');
       let faceDetected = false;
       let detectionAttempts = 0;
       const maxDetectionAttempts = 75;
@@ -145,7 +150,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
           const faceDetection = await detectFaceInVideo(video);
 
           if (faceDetection.hasFace && faceDetection.confidence >= minConfidence) {
-            console.log(`✅ Face detected! Confidence: ${Math.round(faceDetection.confidence * 100)}%`);
             faceDetected = true;
             lastDescriptor = faceDetection.descriptor;
             const eyeMsg = faceDetection.irisVisible ? ' · Iris detected ✓' : faceDetection.eyesOpen ? ' · Eyes open ✓' : '';
@@ -156,17 +160,14 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
             const progress = Math.round((detectionAttempts / maxDetectionAttempts) * 100);
             setMessage(`🔍 Scanning... (${progress}%) - Make sure face is clearly visible`);
             if (detectionAttempts % 5 === 0) {
-              console.log(`Face detection attempt ${detectionAttempts}/${maxDetectionAttempts}...`);
             }
           }
         } catch (err) {
-          console.warn('Face detection attempt error:', err);
           // Continue trying even if an attempt fails
         }
       }
 
       if (!faceDetected) {
-        console.warn('❌ Could not detect face after 10 seconds');
         setStatus("error");
         setMessage("❌ Face not detected. Check lighting, move closer, and ensure face is visible.");
         onError?.("Face not detected");
@@ -200,7 +201,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
           if (faceDetection.hasFace && faceDetection.confidence >= minConfidenceThreshold) {
             consecutiveValidDetections++;
             lastDescriptor = faceDetection.descriptor;
-            console.log(`✓ Face detected (${consecutiveValidDetections}/${requiredConsecutiveDetections})`);
 
             if (consecutiveValidDetections >= requiredConsecutiveDetections) {
               faceIsValid = true;
@@ -208,12 +208,10 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
             }
           } else {
             if (consecutiveValidDetections > 0) {
-              console.warn('Face detection lost, restarting...');
               consecutiveValidDetections = 0;
             }
           }
         } catch (err) {
-          console.warn('Face detection error, continuing...');
           consecutiveValidDetections = 0;
         }
       }
@@ -259,7 +257,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
         }
         if (!userId) throw new Error("User not registered on this device.");
 
-        console.log('🔐 FaceScanner: Starting face verification for userId:', userId, '(from', propUserId ? 'prop' : 'storage', ')');
         
         // First, get stored face embedding from backend
         const API_BASE = process.env.REACT_APP_BACKEND_URL || "https://biovault-backend-d13a.onrender.com";
@@ -276,7 +273,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
         }
 
         const biometricData = await biometricResponse.json();
-        console.log('🔍 FaceScanner: Backend biometric data:', biometricData);
 
         if (!biometricData.ok || !biometricData.faceRegistered) {
           throw new Error("No face biometrics found for this user");
@@ -290,9 +286,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
           throw new Error("No valid face embedding found in backend");
         }
 
-        console.log('📊 FaceScanner: Comparing face with stored embedding');
-        console.log('   - Current embedding length:', embedding.length);
-        console.log('   - Stored embedding length:', storedEmbedding.length);
 
         // Euclidean distance on face-api.js 128-dim descriptors
         // Same person: 0.0–0.45 | Different people: 0.6–1.2 | Threshold: 0.5
@@ -301,7 +294,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
         const isMatch = distance <= DISTANCE_THRESHOLD;
         const similarity = Math.max(0, Math.min(1, 1 - distance / DISTANCE_THRESHOLD));
 
-        console.log('📊 FaceScanner: Face distance:', distance.toFixed(4), '| Match:', isMatch);
 
         if (isMatch) {
           const token = `face_verified_${userId}_${Date.now()}`;
@@ -312,7 +304,6 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
           await appStorage.setItem("biovault_refresh_token", refreshToken);
           localStorage.setItem("biovault_refresh_token", refreshToken);
 
-          console.log('✅ FaceScanner: Face verified, distance:', distance.toFixed(4));
           setStatus("success");
           setMessage(`✓ Face verified (${Math.round(similarity * 100)}% match)`);
           stopCamera();
@@ -351,21 +342,13 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
 
     if (mode === "temp-access") {
       try {
-        console.log('🌐 TempAccess Mode: Searching for user across all devices...');
         const data = await verifyFaceBackend(embedding); // No userId - searches all users
         
-        console.log('📊 TempAccess Response:', {
-          verified: data.verified,
-          userId: data.userId,
-          similarity: data.similarity,
-          message: data.message
-        });
 
         if (!data.verified || !data.userId) {
           throw new Error(data.message || "Face not recognized. Please try again.");
         }
 
-        console.log('✅ TempAccess: User identified as', data.userId, 'with similarity', (data.similarity * 100).toFixed(1) + '%');
         
         setStatus("success");
         setMessage(`✓ Identified (${(data.similarity * 100).toFixed(1)}%)`);
@@ -375,15 +358,12 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
         // Store temp access credentials
         await appStorage.setItem('biovault_userId', data.userId);
         if (data.token) {
-          console.log('💾 Storing access token from temp access');
           localStorage.setItem('biovault_token', data.token);
         }
         if (data.refreshToken) {
-          console.log('💾 Storing refresh token from temp access');
           localStorage.setItem('biovault_refresh_token', data.refreshToken);
         }
         
-        console.log('✅ All credentials stored - ready for dashboard');
         setTimeout(() => onSuccess({ embedding } as any), SUCCESS_HOLD_MS);
         return;
       } catch (err: any) {
@@ -403,22 +383,13 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
 
     // Registration mode: Just capture the face and pass it back to parent component
     // The Register.tsx page will handle the backend storage via registerUser()
-    console.log('🎯 FaceScanner Register Mode: Face captured!');
-    console.log('📊 Embedding captured:', {
-      exists: !!embedding,
-      length: embedding?.length || 0,
-      first5: embedding ? embedding.slice(0, 5) : 'N/A',
-      sum: embedding ? embedding.reduce((a, b) => a + Math.abs(b), 0) : 'N/A'
-    });
     
     setStatus("success");
     setMessage("✓ Face captured successfully");
     stopCamera();
     setCameraReady(false);
     
-    console.log('📤 Calling onSuccess with:', { embedding });
     setTimeout(() => {
-      console.log('✅ onSuccess callback triggered with embedding');
       onSuccess({ embedding } as any);
     }, SUCCESS_HOLD_MS);
   }, [SUCCESS_HOLD_MS, cameraReady, mode, onError, onSuccess, propUserId, stopCamera]);
@@ -430,18 +401,14 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
 
   return (
     <div className="w-full max-w-sm mx-auto flex flex-col items-center gap-4">
-      <div className="w-full text-center">
-        <h3 className="text-xl md:text-2xl font-display font-semibold tracking-wide text-foreground">Face Authentication</h3>
-        <p className="text-sm md:text-base text-muted-foreground mt-1">Use live face verification to continue securely.</p>
-      </div>
-
-      <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden glass-surface border border-border">
+      {/* Camera viewport */}
+      <div className="relative w-full aspect-[4/3] rounded-3xl overflow-hidden bg-slate-100 border border-slate-200">
         {status === "idle" ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
-            <div className="w-20 h-20 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
-              <ScanFace className="w-10 h-10 text-primary opacity-80" />
+            <div className="w-16 h-16 rounded-full bg-violet-100 border-2 border-violet-200 flex items-center justify-center">
+              <ScanFace className="w-8 h-8 text-violet-400" />
             </div>
-            <p className="text-sm text-muted-foreground">Camera preview will appear here</p>
+            <p className="text-xs text-slate-400">Tap below to open camera</p>
           </div>
         ) : (
           <>
@@ -460,15 +427,31 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
             />
             <ScanEffect type="face" active={status === "scanning"} />
 
-            <div className="absolute top-3 left-3 right-3 flex items-center justify-between text-xs md:text-sm">
-              <div className="px-2.5 py-1 rounded-full bg-background/70 border border-border/70 text-foreground/90">Live Camera</div>
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-background/70 border border-border/70 text-foreground/90">
-                <span className={`w-2 h-2 rounded-full ${status === "scanning" ? "bg-primary animate-pulse" : "bg-neon-green"}`} />
+            {/* Top badges */}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+              <span className="px-3 py-1 rounded-full bg-white/80 backdrop-blur-sm border border-white/50 text-[10px] font-bold text-slate-600">
+                Live Camera
+              </span>
+              <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full backdrop-blur-sm border text-[10px] font-bold ${
+                status === "scanning"
+                  ? "bg-violet-500/80 border-violet-400/50 text-white"
+                  : "bg-white/80 border-white/50 text-slate-600"
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${status === "scanning" ? "bg-white animate-pulse" : cameraReady && modelReady ? "bg-emerald-500" : "bg-amber-400"}`} />
                 {status === "scanning" ? "Processing" : cameraReady && modelReady ? "Ready" : "Loading"}
-              </div>
+              </span>
             </div>
 
-
+            {/* Corner frame guides */}
+            <div className="absolute inset-8 pointer-events-none">
+              {[["top-0 left-0", "border-t-2 border-l-2 rounded-tl-xl"],
+                ["top-0 right-0", "border-t-2 border-r-2 rounded-tr-xl"],
+                ["bottom-0 left-0", "border-b-2 border-l-2 rounded-bl-xl"],
+                ["bottom-0 right-0", "border-b-2 border-r-2 rounded-br-xl"],
+              ].map(([pos, border], i) => (
+                <div key={i} className={`absolute ${pos} w-6 h-6 ${border} border-white/70`} />
+              ))}
+            </div>
           </>
         )}
 
@@ -477,70 +460,78 @@ export function FaceScanner({ onSuccess, onError, mode, required = false, userId
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-background/80 flex items-center justify-center"
+              className="absolute inset-0 bg-white/85 backdrop-blur-sm flex items-center justify-center"
             >
-              <CheckCircle className="w-16 h-16 text-neon-green" />
+              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                <CheckCircle className="w-16 h-16 text-emerald-500" />
+              </motion.div>
             </motion.div>
           )}
           {status === "error" && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-background/80 flex items-center justify-center"
+              className="absolute inset-0 bg-white/85 backdrop-blur-sm flex items-center justify-center"
             >
-              <XCircle className="w-16 h-16 text-destructive" />
+              <XCircle className="w-16 h-16 text-red-500" />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
+      {/* Message + actions */}
       <div className="w-full flex flex-col items-center gap-3">
-        <p className="text-center text-sm md:text-base font-medium text-muted-foreground min-h-6">{message || "Ready for secure face authentication"}</p>
+        <p className="text-center text-sm font-medium text-slate-500 min-h-5">{message || "Position your face in the frame"}</p>
 
         <div className="flex items-center justify-center gap-2 flex-wrap">
           {status === "idle" && (
-            <Button variant="cyber" size="lg" onClick={startCamera}>
-              <CameraIcon className="w-4 h-4 mr-2" />
+            <button
+              onClick={startCamera}
+              className="flex items-center gap-2 px-8 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-bold text-sm shadow-lg shadow-violet-200/40 active:scale-95 transition-transform"
+            >
+              <CameraIcon className="w-4 h-4" />
               Start Camera
-            </Button>
+            </button>
           )}
 
           {status === "camera" && mode !== "register" && (
-            <>
-              <Button variant="cyber" size="lg" onClick={startScan} disabled={!cameraReady || !modelReady}>
-                <ScanFace className="w-4 h-4 mr-2" />
-                {!cameraReady ? "Camera Loading..." : !modelReady ? "Face Detection Loading..." : "Verify Face"}
-              </Button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={startScan}
+                disabled={!cameraReady || !modelReady}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-bold text-sm shadow-lg shadow-violet-200/40 active:scale-95 transition-transform disabled:opacity-50 disabled:shadow-none"
+              >
+                <ScanFace className="w-4 h-4" />
+                {!cameraReady ? "Camera Loading..." : !modelReady ? "Loading Model..." : "Verify Face"}
+              </button>
               {!required && (
-                <Button variant="outline" size="lg" onClick={cancelCamera}>
+                <button onClick={cancelCamera} className="px-4 py-3 rounded-xl bg-slate-100 text-slate-500 font-semibold text-sm border border-slate-200">
                   Cancel
-                </Button>
+                </button>
               )}
-            </>
+            </div>
           )}
-          
+
           {status === "camera" && mode === "register" && (
-            <Button 
-              variant="cyber" 
-              size="lg" 
-              onClick={startScan} 
-              className="min-w-[160px]"
+            <button
+              onClick={startScan}
+              className="flex items-center gap-2 px-8 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-bold text-sm shadow-lg shadow-violet-200/40 active:scale-95 transition-transform"
             >
-              <ScanFace className="w-4 h-4 mr-2" />
+              <ScanFace className="w-4 h-4" />
               Capture Face
-            </Button>
+            </button>
           )}
 
           {status === "scanning" && !required && (
-            <Button variant="outline" size="lg" onClick={() => { setStatus("camera"); setMessage("Verification cancelled"); }}>
+            <button onClick={() => { setStatus("camera"); setMessage("Verification cancelled"); }} className="px-6 py-2.5 rounded-xl bg-slate-100 text-slate-500 font-semibold text-sm border border-slate-200">
               Cancel
-            </Button>
+            </button>
           )}
 
           {status === "error" && (
-            <Button variant="outline" size="lg" onClick={() => setStatus("idle")}>
+            <button onClick={() => setStatus("idle")} className="px-6 py-2.5 rounded-xl bg-violet-100 text-violet-700 font-semibold text-sm border border-violet-200">
               Retry
-            </Button>
+            </button>
           )}
         </div>
       </div>

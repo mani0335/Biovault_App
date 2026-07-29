@@ -146,12 +146,6 @@ export default function UploadFromDevice({
 
           setMessage(`✅ File uploaded and encrypted: ${document.name}`);
 
-          console.log("✅ Document saved:", {
-            id: newDocument.id,
-            fileName: newDocument.fileName,
-            fileType,
-            encrypted: newDocument.isEncrypted,
-          });
 
           // Navigate to vault
           setTimeout(() => {
