@@ -305,28 +305,26 @@ const ShareOptionsPanel: React.FC<ShareOptionsPanelProps> = ({
     if (!filePreview || fileSharing) return;
     setFileSharing(true);
     try {
-      const safeName = fileName.replace(/[^a-z0-9._-]/gi, '_').replace(/\.png$/i, '') + '.png';
+      const safeName = fileName.replace(/[^a-z0-9._-]/gi, '_').replace(/\.png$/i, '') + '.jpg';
       const shareTitle = `PINIT DNA Encrypted — ${fileName}`;
       const shareText = '🔒 This image is encrypted with PINIT DNA. Open it in PINIT Vault to verify ownership.';
 
       const { Capacitor } = await import('@capacitor/core');
       if (Capacitor.isNativePlatform()) {
-        // On Android/iOS: save to device cache then share via native intent.
-        // navigator.share({ files }) does not trigger the Android Share Intent
-        // inside a Capacitor WebView — the Capacitor Share plugin does.
         const { Filesystem, Directory } = await import('@capacitor/filesystem');
         const { Share } = await import('@capacitor/share');
+        // Strip data-URL prefix — Capacitor Filesystem.writeFile expects raw base64.
         const base64 = filePreview.includes(',') ? filePreview.split(',')[1] : filePreview;
-        const tempPath = `pinit_share_${Date.now()}.png`;
+        if (!base64 || base64.length < 100) throw new Error('Image data is empty or too small to share.');
+        const tempPath = `pinit_share_${Date.now()}.jpg`;
         await Filesystem.writeFile({ path: tempPath, data: base64, directory: Directory.Cache, recursive: true });
         const { uri } = await Filesystem.getUri({ path: tempPath, directory: Directory.Cache });
-        await Share.share({ title: shareTitle, text: shareText, url: uri, dialogTitle: 'Share Encrypted Image via' });
+        await Share.share({ title: shareTitle, url: uri, dialogTitle: 'Share Encrypted Image via' });
         try { await Filesystem.deleteFile({ path: tempPath, directory: Directory.Cache }); } catch { /* ok */ }
       } else {
-        // Web fallback: use Web Share API with File object
         const res = await fetch(filePreview);
         const blob = await res.blob();
-        const file = new File([blob], safeName, { type: 'image/png' });
+        const file = new File([blob], safeName, { type: blob.type || 'image/jpeg' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: shareTitle, text: shareText });
         } else {
@@ -338,7 +336,12 @@ const ShareOptionsPanel: React.FC<ShareOptionsPanelProps> = ({
       }
       setFileShared(true);
       setTimeout(() => setFileShared(false), 3000);
-    } catch { /* user cancelled */ } finally {
+    } catch (err: unknown) {
+      // Distinguish user-cancel (AbortError / share cancelled) from real errors.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isCancelled = msg.includes('cancel') || msg.includes('abort') || msg.includes('dismissed');
+      if (!isCancelled) alert(`❌ Could not share file:\n${msg}`);
+    } finally {
       setFileSharing(false);
     }
   }, [filePreview, fileName, fileSharing]);
@@ -346,20 +349,33 @@ const ShareOptionsPanel: React.FC<ShareOptionsPanelProps> = ({
   const handlePlatformShare = useCallback(
     async (platform: Platform) => {
       const { Capacitor } = await import('@capacitor/core');
-      // On native Android/iOS: if we have the actual encrypted PNG, share it as a file.
-      // This sends the real image to WhatsApp/Telegram/etc., not just a URL.
-      if (Capacitor.isNativePlatform() && filePreview && !fileSharing) {
-        handleShareEncryptedFile();
+      if (Capacitor.isNativePlatform()) {
+        if (filePreview && !fileSharing) {
+          // Preferred path: share the actual encrypted image file via native intent.
+          handleShareEncryptedFile();
+        } else {
+          // No image data yet — share just the link via the native share sheet.
+          // window.open() does nothing inside an Android WebView, so always use
+          // the Capacitor Share plugin on native.
+          try {
+            const { Share } = await import('@capacitor/share');
+            const link = trackedLink(platform.id);
+            await Share.share({
+              title: `PINIT DNA — ${fileName}`,
+              text: `🔒 Secure PINIT file: ${link}`,
+              dialogTitle: `Share via ${platform.label}`,
+            });
+          } catch { /* user cancelled */ }
+        }
         setSharedPlatforms((prev) => new Set([...prev, platform.id]));
         return;
       }
-      // Web / no file available: fall back to the URL-based share approach.
+      // Web: open the platform's share URL in a new tab.
       const link = trackedLink(platform.id);
-      const shareUrl = platform.getShareUrl(link);
-      window.open(shareUrl, '_blank', 'noopener,noreferrer');
+      window.open(platform.getShareUrl(link), '_blank', 'noopener,noreferrer');
       setSharedPlatforms((prev) => new Set([...prev, platform.id]));
     },
-    [trackedLink, filePreview, fileSharing, handleShareEncryptedFile]
+    [trackedLink, filePreview, fileSharing, fileName, handleShareEncryptedFile]
   );
 
   const handleNativeShare = useCallback(async () => {
