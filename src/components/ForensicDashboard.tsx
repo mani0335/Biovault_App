@@ -185,6 +185,7 @@ export const ForensicDashboard: React.FC<ForensicDashboardProps> = ({ scannedIma
   const [scanning, setScanning] = useState(true);
   const [progress, setProgress] = useState(0);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 
   const handleDownloadCertificate = async () => {
@@ -208,6 +209,7 @@ export const ForensicDashboard: React.FC<ForensicDashboardProps> = ({ scannedIma
   useEffect(() => {
     let cancelled = false;
     setReport(null);
+    setScanError(null);
     setScanning(true);
     setProgress(0);
     const interval = setInterval(() => {
@@ -219,9 +221,25 @@ export const ForensicDashboard: React.FC<ForensicDashboardProps> = ({ scannedIma
       : scannedImage.startsWith('data:application/pdf') ? 'application/pdf'
       : 'image/jpeg';
 
-    runForensicScan(scannedImage, fileName, mime, scannedImage.length, vaultDocHintsRef.current)
-      .then((r) => { if (!cancelled) { setReport(r); setProgress(100); setTimeout(() => setScanning(false), 400); } })
-      .catch(() => { if (!cancelled) { clearInterval(interval); setScanning(false); } });
+    // 45-second timeout prevents infinite loading when image decode hangs in low-memory WebViews
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Scan timed out — try a smaller image')), 45000),
+    );
+
+    Promise.race([
+      runForensicScan(scannedImage, fileName, mime, scannedImage.length, vaultDocHintsRef.current),
+      timeout,
+    ])
+      .then((r) => {
+        if (!cancelled) { setReport(r); setProgress(100); setTimeout(() => setScanning(false), 400); }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          clearInterval(interval);
+          setScanError(err instanceof Error ? err.message : 'Scan failed — please try again');
+          setScanning(false);
+        }
+      });
 
     return () => { cancelled = true; clearInterval(interval); };
   }, [scannedImage, fileName]); // vaultDocHints excluded — use ref to avoid re-scan on parent re-render
@@ -293,6 +311,26 @@ export const ForensicDashboard: React.FC<ForensicDashboardProps> = ({ scannedIma
                 : 'Generating ownership proof...'}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Scan error */}
+      {!scanning && !report && scanError && (
+        <div className="px-4 py-8 flex flex-col items-center gap-4 text-center">
+          <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <Shield className="w-8 h-8" style={{ color: '#ef4444' }} />
+          </div>
+          <div>
+            <p className="text-sm font-black" style={{ color: '#ef4444' }}>SCAN FAILED</p>
+            <p className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>{scanError}</p>
+          </div>
+          <button
+            onClick={onBack}
+            className="px-4 py-2 rounded-full text-xs font-bold"
+            style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#a78bfa' }}
+          >
+            Go Back
+          </button>
         </div>
       )}
 

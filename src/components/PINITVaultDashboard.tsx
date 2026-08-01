@@ -95,6 +95,7 @@ import {
   GitCompareArrows,
   ShieldCheck,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { appStorage } from "@/lib/storage";
@@ -3215,10 +3216,38 @@ function EncryptPreviewPage({
 
       setIsProcessing(true);
 
-      // ── Step 1: Acquire mandatory GPS ──────────────────────────────────────
-      // Encryption CANNOT proceed without exact GPS. Block here until we have it.
-      // GPS is captured best-effort inside captureDeviceNetworkDna() below.
-      // No blocking GPS gate — encryption proceeds even if GPS is unavailable.
+      // ── Step 0: Resize oversized camera images ──────────────────────────────
+      // Android cameras can produce 12-50 MP images (40+ MB base64). Loading such
+      // images into canvas for DNA generation causes OOM crashes in Android WebView.
+      // Cap at 1920px longest side — enough for DNA fingerprinting, far more than
+      // the 1024px watermark canvas needs.
+      setEncryptStep('📐 Preparing image...');
+      let workingImage = image;
+      if (image.length > 1_500_000) {
+        try {
+          const el = await new Promise<HTMLImageElement | null>((res) => {
+            const img = new Image();
+            const t = setTimeout(() => res(null), 10000);
+            img.onload = () => { clearTimeout(t); res(img); };
+            img.onerror = () => { clearTimeout(t); res(null); };
+            img.src = image;
+          });
+          if (el && (el.width > 1920 || el.height > 1920)) {
+            const MAX = 1920;
+            const scale = Math.min(MAX / el.width, MAX / el.height);
+            const c = document.createElement('canvas');
+            c.width = Math.round(el.width * scale);
+            c.height = Math.round(el.height * scale);
+            const ctx = c.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(el, 0, 0, c.width, c.height);
+              workingImage = c.toDataURL('image/jpeg', 0.92);
+            }
+          }
+        } catch { /* keep original */ }
+      }
+
+      // ── Step 1: GPS captured best-effort below — no blocking gate ─────────
 
       // ── Step 2: Run DNA generation and full device capture ─────────────────
       setEncryptStep('🧬 Generating ownership DNA...');
@@ -3237,7 +3266,7 @@ function EncryptPreviewPage({
         (async () => {
           try {
             const { generateExtendedDocumentDNA } = await import('@/lib/documentDna');
-            return await generateExtendedDocumentDNA(image, encFileName, 'image/jpeg', image.length, { userId, ownerName: userName || undefined });
+            return await generateExtendedDocumentDNA(workingImage, encFileName, 'image/jpeg', workingImage.length, { userId, ownerName: userName || undefined });
           } catch { return null; }
         })(),
         (async () => {
@@ -3254,7 +3283,7 @@ function EncryptPreviewPage({
       setEncryptStep('🔐 Embedding ownership into image pixels...');
       try {
         const { embedPersistentDna } = await import('@/lib/dna/persistentDna');
-        embeddedImageBase64 = await embedPersistentDna(image, {
+        embeddedImageBase64 = await embedPersistentDna(workingImage, {
           ownerId: userId,
           pinitId: `PINIT-${userId.slice(0, 8).toUpperCase()}`,
           dnaId,
@@ -3276,10 +3305,10 @@ function EncryptPreviewPage({
         encryptionMethod = 'persistent-dna';
       } catch {
         try {
-          embeddedImageBase64 = await embedSimpleWatermark(image, userId, encTimestamp);
+          embeddedImageBase64 = await embedSimpleWatermark(workingImage, userId, encTimestamp);
           encryptionMethod = 'simple';
         } catch {
-          embeddedImageBase64 = image;
+          embeddedImageBase64 = workingImage;
           encryptionMethod = 'none';
         }
       }
@@ -3604,6 +3633,7 @@ function SharePage({
   const [configTab, setConfigTab] = useState<'access' | 'security' | 'tracking'>('access');
   const [oneTimeUse, setOneTimeUse] = useState(false);
   const [blockVpn, setBlockVpn] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   // Scenario 5 — TEP state (local to SharePage where it's used)
   const [isTepShare, setIsTepShare] = useState(false);
   const [tepRecipientName, setTepRecipientName] = useState('');
@@ -4419,28 +4449,42 @@ function SharePage({
 
           {/* Generate button */}
           <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={isGenerating ? {} : { scale: 1.02 }}
+            whileTap={isGenerating ? {} : { scale: 0.98 }}
+            disabled={isGenerating}
             onClick={async () => {
+              setIsGenerating(true);
               try {
                 await handleGenerateShare();
               } catch (err) {
-                console.error("❌ Share button error:", err);
                 alert(`❌ Share error: ${(err as any)?.message || String(err)}`);
+              } finally {
+                setIsGenerating(false);
               }
             }}
-            className="w-full relative overflow-hidden rounded-2xl py-4 font-black text-white text-sm tracking-wide shadow-xl"
+            className="w-full relative overflow-hidden rounded-2xl py-4 font-black text-white text-sm tracking-wide shadow-xl disabled:opacity-70"
             style={{ background: 'linear-gradient(135deg, #a21caf 0%, #7c3aed 50%, #2563eb 100%)' }}
           >
-            <motion.div
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12"
-              initial={{ x: '-150%' }}
-              whileHover={{ x: '150%' }}
-              transition={{ duration: 0.6 }}
-            />
+            {!isGenerating && (
+              <motion.div
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12"
+                initial={{ x: '-150%' }}
+                whileHover={{ x: '150%' }}
+                transition={{ duration: 0.6 }}
+              />
+            )}
             <span className="relative flex items-center justify-center gap-2">
-              <Share2 className="w-4 h-4" />
-              Generate Share Link
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-4 h-4" />
+                  Generate Share Link
+                </>
+              )}
             </span>
           </motion.button>
         </motion.div>
