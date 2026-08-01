@@ -32,6 +32,7 @@ const Register = () => {
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [registerStatus, setRegisterStatus] = useState<string>('Store & Verify');
   const [userIdSaved, setUserIdSaved] = useState(false);
 
   useEffect(() => {
@@ -297,6 +298,7 @@ const Register = () => {
                     onClick={async () => {
                       setIsRegistering(true);
                       setRegisterError(null);
+                      setRegisterStatus('Connecting to server…');
                       try {
                         if (!(webauthn as { id?: string })?.id) {
                           throw new Error('Fingerprint not captured. Please go back and register your fingerprint.');
@@ -322,7 +324,10 @@ const Register = () => {
                         const verifyUserId = await appStorage.getItem('biovault_userId');
                         if (verifyUserId !== userId) throw new Error('Failed to save userId to storage');
 
-                        const data = await registerUser({ userId, deviceToken, webauthn, faceEmbedding });
+                        const data = await registerUser(
+                          { userId, deviceToken, webauthn, faceEmbedding },
+                          (msg) => setRegisterStatus(msg),
+                        );
                         if (!data || !data.ok) throw new Error('Backend registration returned invalid response');
 
                         if (data?.tempCode) setRecoveryCode(String(data.tempCode));
@@ -338,6 +343,7 @@ const Register = () => {
                         const msg = e instanceof Error ? e.message : 'Registration failed';
                         setRegisterError('Registration Error: ' + msg);
                         setIsRegistering(false);
+                        setRegisterStatus('Store & Verify');
                       }
                     }}
                     className={`w-full py-3.5 rounded-2xl font-bold text-sm shadow-lg flex items-center justify-center gap-2 transition-all ${
@@ -351,9 +357,9 @@ const Register = () => {
                         <motion.div
                           animate={{ rotate: 360 }}
                           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full flex-shrink-0"
                         />
-                        Verifying…
+                        <span className="truncate text-xs">{registerStatus}</span>
                       </>
                     ) : (
                       <>

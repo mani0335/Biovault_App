@@ -114,25 +114,38 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-export async function registerUser(payload: RegisterPayload): Promise<{ ok: true; tempCode?: string; mode: "remote" }> {
-  // FAST MODE - Skip connectivity test for speed
-  const apiUrl = apiBase(); // Will always be Render URL
-  
-  
-  // Skip connectivity test for speed - go directly to registration
-  
-  
-  let lastError: any = null;
-  
-  // Retry logic for registration
-  for (let attempt = 1; attempt <= 3; attempt++) {
+export async function registerUser(
+  payload: RegisterPayload,
+  onStatus?: (msg: string) => void,
+): Promise<{ ok: true; tempCode?: string; mode: "remote" }> {
+  const apiUrl = apiBase();
+
+  // ── Wake-up ping ────────────────────────────────────────────────────────────
+  // Render free plan sleeps after inactivity and takes ~50 s to cold-start.
+  // A quick GET / fires first; we don't await it — we just let it warm the
+  // instance while we kick off the real POST.  This shaves ~10 s off the wait.
+  try {
+    fetch(`${apiUrl}/`, { method: 'GET', signal: AbortSignal.timeout(90000) }).catch(() => {});
+  } catch { /* ignore — fire and forget */ }
+
+  let lastError: Error | null = null;
+  const MAX_ATTEMPTS = 4;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
+      if (attempt === 1) {
+        onStatus?.('Connecting to server…');
+      } else {
+        onStatus?.(`Server is waking up — attempt ${attempt} of ${MAX_ATTEMPTS}…`);
+      }
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for better reliability
+      // 90 s per attempt — enough for a full Render cold-start (~50 s) plus response time
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
 
       const response = await fetch(`${apiUrl}/auth/biometric-register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
@@ -140,59 +153,57 @@ export async function registerUser(payload: RegisterPayload): Promise<{ ok: true
       clearTimeout(timeoutId);
 
       const responseText = await response.text();
-      
-      let data;
+
+      let data: { error?: string; tempCode?: string; ok?: boolean; message?: string };
       try {
-        data = JSON.parse(responseText) as { error?: string; tempCode?: string; ok?: boolean; message?: string };
-      } catch (parseErr: any) {
-        console.error('❌ JSON parse failed:', parseErr.message);
-        lastError = new Error(`Failed to parse server response: ${parseErr.message}`);
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 2000));
+        data = JSON.parse(responseText);
+      } catch {
+        lastError = new Error('Failed to parse server response');
+        if (attempt < MAX_ATTEMPTS) {
+          onStatus?.('Retrying…');
+          await new Promise(r => setTimeout(r, 3000));
           continue;
         }
         throw lastError;
       }
-      
+
       if (!response.ok) {
         lastError = new Error(data.message || data.error || `Registration failed (${response.status})`);
-        
-        // Retry on network/server errors
-        if (attempt < 3 && response.status >= 500) {
-          await new Promise(r => setTimeout(r, 2000));
+
+        // 502/503 = Render is still booting — wait 40 s then retry
+        if (attempt < MAX_ATTEMPTS && (response.status === 502 || response.status === 503 || response.status >= 500)) {
+          const waitMs = (response.status === 502 || response.status === 503) ? 40000 : 3000;
+          onStatus?.('Server is starting up, please wait…');
+          await new Promise(r => setTimeout(r, waitMs));
           continue;
         }
         throw lastError;
       }
-    
-    // ✅ STORE PERMANENT DEVICE UUID AFTER REGISTRATION SUCCESS
-    localStorage.setItem('biovault_registeredDeviceToken', payload.deviceToken);
-    localStorage.setItem('biovault_registrationTime', new Date().toISOString());
-    
-    return { ok: true, tempCode: data.tempCode, mode: "remote" };
-    } catch (fetchErr: any) {
-      console.error('❌ Network error during registration:', fetchErr.message);
-      console.error('❌ Error name:', fetchErr.name);
-      console.error('❌ Backend URL:', apiUrl);
-      
-      // Handle AbortError specifically
-      if (fetchErr.name === 'AbortError') {
-        console.error('❌ Request timed out - backend took too long to respond');
-        lastError = new Error('Registration timed out. Backend server may be slow. Please try again.');
+
+      // ✅ Success
+      localStorage.setItem('biovault_registeredDeviceToken', payload.deviceToken);
+      localStorage.setItem('biovault_registrationTime', new Date().toISOString());
+      return { ok: true, tempCode: data.tempCode, mode: 'remote' };
+
+    } catch (fetchErr: unknown) {
+      const err = fetchErr instanceof Error ? fetchErr : new Error(String(fetchErr));
+
+      if (err.name === 'AbortError') {
+        lastError = new Error('Server took too long to respond. It may still be warming up — please try again.');
       } else {
-        lastError = fetchErr;
+        lastError = err;
       }
-      
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 2000));
+
+      if (attempt < MAX_ATTEMPTS) {
+        onStatus?.('Retrying…');
+        await new Promise(r => setTimeout(r, 3000));
         continue;
       }
       throw new Error(`Failed to register: ${lastError.message}. Backend: ${apiUrl}`);
     }
   }
-  
-  console.error('❌ Registration failed after all retries:', lastError?.message);
-  throw lastError;
+
+  throw lastError ?? new Error('Registration failed after all attempts');
 }
 
 export async function validateUser(userId: string, deviceToken: string): Promise<{ authorized: boolean; reason?: string; mode: "remote" | "local" }> {
